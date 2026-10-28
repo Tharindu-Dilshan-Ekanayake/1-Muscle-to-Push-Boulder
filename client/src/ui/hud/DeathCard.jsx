@@ -1,5 +1,3 @@
-import { useEffect } from 'react'
-
 import { formatNumber } from '@shared/format'
 
 import { pressRespawn } from '../../bloxity/deathScreen'
@@ -13,28 +11,18 @@ import { GRADIENTS, u } from './style'
 /**
  * Crushed: the game's own death card, in the middle of the screen (Boxity keeps the
  * edges for its ads): what that boulder needs, and a Respawn button that unlocks when
- * Boxity's countdown is over - the number on it until then. Space, Enter or R press it
- * too. Respawning takes you back to the lobby.
+ * Boxity's countdown is over - the number on it until then. It stays up until Respawn
+ * is clicked (no key does it: a jump while you're down mustn't respawn you). Respawning
+ * takes you back to the lobby.
  */
 export function DeathCard() {
   const death = useGame((s) => s.death)
   const ready = death?.seconds === 0
 
-  useEffect(() => {
-    if (!death) return undefined
-    const onKey = (e) => {
-      if (e.repeat || !['Space', 'Enter', 'KeyR'].includes(e.code)) return
-      e.preventDefault()
-      pressRespawn()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [death])
-
   if (!death) return null
   const stage = STAGES[death.stage]
   return (
-    <div className="pp-banner pointer-events-none absolute left-1/2 top-[38%] flex flex-col items-center text-center" style={{ gap: u(10) }}>
+    <div className="pp-death pointer-events-none absolute left-1/2 top-[38%] flex flex-col items-center text-center" style={{ gap: u(10) }}>
       <span style={{ fontSize: u(120) }}>
         <StrokeText stroke={u(20)} gradient={GRADIENTS.priceShort}>
           CRUSHED!

@@ -361,6 +361,25 @@ canvas {
   animation: pp-banner 2.6s ease-out forwards;
 }
 
+/* The death card: pops in like a banner, then stays until Respawn is pressed. */
+@keyframes pp-death {
+  0% {
+    transform: translate(-50%, -50%) scale(0.3) rotate(-6deg);
+    opacity: 0;
+  }
+  55% {
+    transform: translate(-50%, -50%) scale(1.15) rotate(2deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1) rotate(0);
+    opacity: 1;
+  }
+}
+.pp-death {
+  animation: pp-death 0.55s ease-out both;
+}
+
 /* Things only shown where the screen is tall enough for them (not landscape phones). */
 @media (max-height: 560px) {
   .pp-tall-only {
