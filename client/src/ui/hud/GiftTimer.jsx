@@ -4,16 +4,16 @@ import { playtimeStatus } from '@shared/logic'
 
 import { actions } from '../../net/actions'
 import { useGame } from '../../store/game'
+import Icon from '../Icon'
 import RewardIcon from '../RewardIcon'
 import StrokeText from '../StrokeText'
 import useNow from '../useNow'
-import { ChunkyButton } from './parts'
 import { GRADIENTS, u } from './style'
 
 /**
- * "FREE GIFT in 4:02", top centre as in the reference: the next playtime reward of this
- * session counting down, turning into a CLAIM button once it's ready. Only this ticks
- * once a second; nothing else re-renders for it.
+ * "FREE GIFT", top right as in the reference: the next playtime reward of this session,
+ * peeking out of a gift box, counting down underneath and bouncing once it's ready to
+ * claim. Only this ticks once a second; nothing else re-renders for it.
  */
 export function GiftTimer() {
   const session = useGame((s) => s.session)
@@ -24,22 +24,28 @@ export function GiftTimer() {
   const ready = next.state === 'ready'
 
   return (
-    <ChunkyButton
-      gradient={ready ? GRADIENTS.greenButton : GRADIENTS.goldButton}
+    <button
+      type="button"
       onClick={ready ? () => actions.claimPlaytime(next.index) : undefined}
       title={reward.label}
-      radius={40}
-      border={5}
-      className={ready ? 'pp-bounce' : ''}
-      style={{ height: u(74), padding: `0 ${u(30)} 0 ${u(86)}`, cursor: ready ? 'pointer' : 'default' }}
+      className={`pp-btn pointer-events-auto relative flex flex-col items-center ${ready ? 'pp-bounce' : ''}`}
+      style={{ width: u(220), cursor: ready ? 'pointer' : 'default' }}
     >
-      <span className="absolute" style={{ left: u(-18), top: u(-16) }}>
-        <RewardIcon icon={reward.icon} size={u(100)} />
+      <span className="relative" style={{ width: u(150), height: u(150) }}>
+        <Icon name="gift" size={u(150)} className="absolute left-0 top-0" />
+        <span className="absolute" style={{ right: u(-16), top: u(-18) }}>
+          <RewardIcon icon={reward.icon} size={u(84)} />
+        </span>
       </span>
-      <span style={{ fontSize: u(40) }}>
-        <StrokeText stroke={u(9)}>{ready ? `CLAIM ${reward.label}!` : `FREE ${reward.label} in ${formatClock(next.unlocksIn)}`}</StrokeText>
+      <span style={{ fontSize: u(46), marginTop: u(-18), transform: 'rotate(-4deg)' }}>
+        <StrokeText stroke={u(10)}>{ready ? 'CLAIM!' : 'FREE GIFT'}</StrokeText>
       </span>
-    </ChunkyButton>
+      <span style={{ fontSize: u(30) }}>
+        <StrokeText stroke={u(7)} gradient={GRADIENTS.gold}>
+          {ready ? reward.label : formatClock(next.unlocksIn)}
+        </StrokeText>
+      </span>
+    </button>
   )
 }
 

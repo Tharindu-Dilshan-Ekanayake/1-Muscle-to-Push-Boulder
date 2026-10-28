@@ -1,5 +1,6 @@
 import { Vector3 } from 'three'
 
+import { WORLD } from '../game/push/course'
 import { runtime } from '../game/runtime'
 
 /**
@@ -12,6 +13,8 @@ import { runtime } from '../game/runtime'
 export const remotePlayers = new Map()
 
 const MAX_SNAPSHOTS = 24
+/** The synced `pushMeter` of someone who isn't pushing (see the server's schema). */
+const NOT_PUSHING = -999
 
 export function upsertRemotePlayer(sessionId, state) {
   let r = remotePlayers.get(sessionId)
@@ -24,7 +27,8 @@ export function upsertRemotePlayer(sessionId, state) {
       yaw: state.rotY,
       speed: 0,
       anim: 'idle',
-      boardId: 'wood',
+      dumbbellId: 'wood',
+      aura: '',
       /** Their avatar's outfit, parsed from `look`; `lookKey` is the raw string. */
       look: null,
       lookKey: '',
@@ -32,14 +36,49 @@ export function upsertRemotePlayer(sessionId, state) {
       /** Follow state per equipped pet, grown as needed and reused. */
       pets: [],
       walkPhase: 0,
+      /**
+       * Up the mountain: whether they're there, pushing a boulder ('push') or walking a
+       * SAFEZONE ('free'), where they've reported, and where they're drawn (eased towards
+       * it), across too; `pushStage` is the stage they're on.
+       */
+      pushing: false,
+      pushPhase: '',
+      pushMeter: 0,
+      pushX: 0,
+      shownMeter: 0,
+      shownX: 0,
+      roll: 0,
+      /** Walking a SAFEZONE: which way they face, and how fast they go. */
+      climbYaw: Math.PI,
+      climbSpeed: 0,
+      /** Their Muscle, and when it last went up (they're lifting: curl). */
+      muscle: state.muscle || 0,
+      liftedAt: 0,
+      /** Where they're drawn: up the track while pushing, else in the plaza. */
+      shownAt: new Vector3(state.x, state.y, state.z),
     }
-    r.shadow = { position: r.position, size: 1.1, visible: true }
+    r.shadow = { position: r.shownAt, size: 1.1, visible: true }
     runtime.shadowCasters.add(r.shadow)
     remotePlayers.set(sessionId, r)
   }
   r.name = state.name
   r.anim = state.anim
-  r.boardId = state.boardId
+  r.dumbbellId = state.dumbbellId || 'wood'
+  r.aura = state.aura || ''
+  if (state.muscle > r.muscle) r.liftedAt = performance.now()
+  r.muscle = state.muscle
+  r.world = state.world || 0
+  // Climbing in another world: not on this mountain (and not in the plaza either).
+  const pushing = state.pushMeter > NOT_PUSHING && r.world === WORLD
+  if (pushing && !r.pushing) {
+    // Just started: drawn from where they are, no easing in from elsewhere.
+    r.shownMeter = state.pushMeter
+    r.shownX = state.pushX
+  }
+  r.pushing = pushing
+  r.pushPhase = state.pushPhase || ''
+  r.pushMeter = state.pushMeter
+  r.pushX = state.pushX
   if (state.look !== r.lookKey) {
     r.lookKey = state.look
     try {
@@ -63,12 +102,10 @@ export function removeRemotePlayer(sessionId) {
   const r = remotePlayers.get(sessionId)
   if (!r) return
   runtime.shadowCasters.delete(r.shadow)
-  runtime.ghostSlides.delete(sessionId)
   remotePlayers.delete(sessionId)
 }
 
 export function clearRemotePlayers() {
   for (const id of [...remotePlayers.keys()]) removeRemotePlayer(id)
   runtime.remotePets.length = 0
-  runtime.ghostSlides.clear()
 }

@@ -2,11 +2,11 @@ import { Room } from '@colyseus/core'
 
 import { applyOfflineProgress } from '../../../shared/logic.js'
 import { PlayerSession } from '../../../shared/session.js'
-import { clampToWalkable, isSlideReturn, MAX_MOVE_SPEED, SPAWN } from '../../../shared/world.js'
+import { clampToWalkable, isPushReturn, MAX_MOVE_SPEED, SPAWN } from '../../../shared/world.js'
 import { getSphinxStock, loadProfile, saveProfile, takeSphinx } from '../db.js'
 import { getLeaderboards } from '../leaderboards.js'
 import { activePlayers, broadcastAll, liveRooms } from '../registry.js'
-import { GameState, PlayerState } from './schema.js'
+import { GameState, NOT_PUSHING, PlayerState } from './schema.js'
 
 const MAX_CLIENTS = 8
 const RECONNECT_SECONDS = 20
@@ -22,7 +22,7 @@ const DUPLICATE_LOGIN = 4100
 const POD = process.env.POD_NAME || `local-${process.pid}`
 
 /** What other players may be told someone is doing. */
-const ANIMS = ['idle', 'walk', 'run', 'jump', 'slide']
+const ANIMS = ['idle', 'walk', 'train', 'jump', 'push', 'dance']
 
 /** Unambiguous characters for lobby codes people read out to each other. */
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -104,7 +104,7 @@ export class GameRoom extends Room {
     const player = new PlayerState()
     const spawnX = SPAWN.x + (Math.random() - 0.5) * 6
     const spawnZ = SPAWN.z + (Math.random() - 0.5) * 4
-    Object.assign(player, { name, x: spawnX, y: 0, z: spawnZ, rotY: Math.PI, anim: 'idle' })
+    Object.assign(player, { name, x: spawnX, y: 0, z: spawnZ, rotY: Math.PI, anim: 'idle', pushMeter: NOT_PUSHING })
     this.state.players.set(client.sessionId, player)
 
     const session = new PlayerSession(profile, {
@@ -117,12 +117,11 @@ export class GameRoom extends Room {
         if (ok) broadcastAll('stock', { sphinx: getSphinxStock() })
         return ok
       },
-      onSlide: (result) => {
-        this.broadcast(
-          'ghostSlide',
-          { sid: client.sessionId, distance: result.distance, duration: result.duration, boardId: profile.equippedBoard, x: player.x, z: player.z },
-          { except: client },
-        )
+      // Everyone else sees you up the track from the synced state.
+      onPush: (push) => {
+        player.pushMeter = push ? push.meter : NOT_PUSHING
+        player.pushX = push ? push.x : 0
+        player.pushPhase = push ? push.phase : ''
       },
     })
 
@@ -143,7 +142,7 @@ export class GameRoom extends Room {
     const member = this.members.get(client.sessionId)
     if (!member || member.kicked) return
     // Stop training while away; the seat stays warm for the reconnect.
-    member.session.handle('leaveTreadmill', {}, Date.now())
+    member.session.handle('leaveZone', {}, Date.now())
     member.reconnection = this.allowReconnection(client, RECONNECT_SECONDS)
     try {
       await member.reconnection
@@ -231,11 +230,13 @@ export class GameRoom extends Room {
     const player = this.state.players.get(sessionId)
     if (!member || !player) return
     const p = member.session.profile
-    if (player.slide !== p.slide) player.slide = p.slide
+    if (player.muscle !== p.muscle) player.muscle = p.muscle
+    if (player.world !== p.world) player.world = p.world
     if (player.wins !== p.wins) player.wins = p.wins
     if (player.rebirths !== p.rebirths) player.rebirths = p.rebirths
     if (player.level !== p.level) player.level = p.level
-    if (player.boardId !== p.equippedBoard) player.boardId = p.equippedBoard
+    if (player.dumbbellId !== p.equippedDumbbell) player.dumbbellId = p.equippedDumbbell
+    if (player.aura !== (p.equippedAura || '')) player.aura = p.equippedAura || ''
     const pets = p.equippedPets
       .map((uid) => p.pets.find((pet) => pet.uid === uid)?.id)
       .filter(Boolean)
@@ -247,7 +248,7 @@ export class GameRoom extends Room {
 
   /**
    * Position reports, ~10 Hz from each client. Accepted if the move is physically
-   * possible since the last accepted one (or is the hop back to the top after a slide);
+   * possible since the last accepted one (or is the trip back after a push);
    * otherwise the client is snapped back.
    */
   handlePosition(client, msg) {
@@ -262,7 +263,7 @@ export class GameRoom extends Room {
     const now = Date.now()
     const dt = Math.max(0.05, (now - member.lastPosAt) / 1000)
     const dist = Math.hypot(x - member.lastPos.x, z - member.lastPos.z)
-    if (dist > MAX_MOVE_SPEED * dt + MOVE_SLACK && !isSlideReturn(member.lastPos, { x, z })) {
+    if (dist > MAX_MOVE_SPEED * dt + MOVE_SLACK && !isPushReturn(member.lastPos, { x, z })) {
       client.send('correct', { x: member.lastPos.x, y: player.y, z: member.lastPos.z })
       return
     }

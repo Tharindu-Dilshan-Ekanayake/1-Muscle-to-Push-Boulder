@@ -17,15 +17,23 @@ export function send(type, payload) {
 }
 
 export const actions = {
-  /** Starts a slide; only counts standing on the SLIDE ZONE (the SLIDE! button sends it). */
-  slide: () => send('slide'),
-  enterTreadmill: (treadmill) => send('enterTreadmill', { treadmill }),
-  leaveTreadmill: () => send('leaveTreadmill'),
+  /** One click: a lift with your dumbbell. */
+  lift: () => send('lift'),
+  enterZone: (zone) => send('enterZone', { zone }),
+  leaveZone: () => send('leaveZone'),
+  /** Starts a push; only counts standing on the PUSH ZONE (walking onto it sends it). */
+  startPush: () => send('startPush'),
+  /** Where you've got to up the track (a few times a second while pushing). */
+  pushAt: (meter, x) => send('pushAt', { meter, x }),
+  endPush: (reason) => send('endPush', { reason }),
+  /** The boulder rolled into Wins orb `index`. */
+  collectOrb: (index) => send('collectOrb', { index }),
   rebirth: () => send('rebirth'),
   skipRebirth: () => send('skipRebirth'),
-  buyBoard: (id) => send('buyBoard', { id }),
-  equipBoard: (id) => send('equipBoard', { id }),
-  /** Buys Slide pack `index` (0-3) from the bar under the level. */
+  buyDumbbell: (id) => send('buyDumbbell', { id }),
+  equipDumbbell: (id) => send('equipDumbbell', { id }),
+  equipAura: (id) => send('equipAura', { id }),
+  /** Buys Muscle pack `index` (0-2) from under the level bar. */
   buyPack: (index) => send('buyPack', { index }),
   hatch: (eggId, count = 1) => send('hatch', { eggId, count }),
   openEggItem: (itemId) => send('openEggItem', { itemId }),

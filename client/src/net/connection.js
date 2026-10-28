@@ -38,14 +38,14 @@ function serverTarget() {
 /**
  * Local development: the game server's usual port, then 3000, where older server .env
  * files put it. Only a server that says it's this game counts, so another project's
- * server on one of those ports (the +1 Frisbee one, say) is skipped.
+ * server on one of those ports (the +1 Slide Downhill one, say) is skipped.
  */
 const DEV_PORTS = [2567, 3000]
 async function findDevServer() {
   for (const port of DEV_PORTS) {
     const url = `${window.location.protocol}//${window.location.hostname}:${port}`
     const health = await healthOf(url)
-    if (health?.ok && health.game === 'slide') return url
+    if (health?.ok && health.game === 'boulder') return url
   }
   return null
 }
@@ -133,9 +133,6 @@ function attachRoom(room, identity, Callbacks) {
         break
       case 'leaderboards':
         getGame().setLeaderboards(payload)
-        break
-      case 'ghostSlide':
-        runtime.ghostSlides.set(payload.sid, { ...payload, startedAt: performance.now() })
         break
       case 'kicked':
         leaving = true

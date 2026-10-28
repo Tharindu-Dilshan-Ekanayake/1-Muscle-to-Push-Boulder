@@ -10,27 +10,56 @@ import { GRADIENTS, u } from '../hud/style'
 import Panel from './Panel'
 
 const SECTIONS = [
-  { title: 'Passes', items: ['slideX2', 'winsX2'] },
-  { title: 'Treadmills', items: ['treadVeryOp', 'treadBest'] },
+  { title: 'Passes', items: ['muscleX2', 'winsX2', 'muscleX3', 'winsX3', 'vip'] },
+  { title: 'Potions', items: ['potionsMuscle', 'potionsWins'] },
+  { title: 'Eggs', items: ['eggsSunset', 'eggsUnicorn', 'eggsDemon'] },
+  { title: 'Train Zones', items: ['zoneVeryOp', 'zoneBest'] },
+  { title: 'Auras', items: ['auraLightning', 'auraGalaxy', 'auraWater', 'auraFire', 'auraRainbow'] },
   { title: 'Specials', items: ['sphinx'] },
 ]
 
 const ICONS = {
-  slideX2: 'slide',
+  muscleX2: 'muscle',
   winsX2: 'trophy',
-  treadVeryOp: 'portal',
-  treadBest: 'portal',
+  muscleX3: 'muscle',
+  winsX3: 'trophy',
+  vip: 'starGold',
+  potionsMuscle: 'potionMuscle',
+  potionsWins: 'potionWins',
+  eggsSunset: 'egg:sunset',
+  eggsUnicorn: 'egg:unicorn',
+  eggsDemon: 'egg:demon',
+  zoneVeryOp: 'dumbbell',
+  zoneBest: 'dumbbell',
+  auraLightning: 'aura:lightning',
+  auraGalaxy: 'aura:galaxy',
+  auraWater: 'aura:water',
+  auraFire: 'aura:fire',
+  auraRainbow: 'aura:rainbow',
 }
 
 const BLURBS = {
-  slideX2: 'Double every Slide gain, forever',
-  winsX2: 'Double the Wins from every slide, forever',
-  treadVeryOp: 'Unlocks the x30 Ice Treadmill',
-  treadBest: 'Unlocks the x60 Galaxy Treadmill',
-  sphinx: 'Limited: x150 Slide pet',
+  muscleX2: 'Double every Muscle gain, forever',
+  winsX2: 'Double the Wins from every push, forever',
+  muscleX3: 'Triple every Muscle gain, forever',
+  winsX3: 'Triple the Wins from every push, forever',
+  vip: 'x1.5 Muscle and x1.5 Wins, forever',
+  potionsMuscle: 'Three x2 Muscle potions, cheaper',
+  potionsWins: 'Three x2 Wins potions, cheaper',
+  eggsSunset: 'Three Sunset Eggs to hatch',
+  eggsUnicorn: 'Three Unicorn Eggs to hatch',
+  eggsDemon: 'Three Demon Eggs to hatch',
+  zoneVeryOp: 'Unlocks the 30X Frost Gym',
+  zoneBest: 'Unlocks the 60X Galaxy Gym',
+  auraLightning: 'x1.25 Wins, and it crackles',
+  auraGalaxy: 'x1.5 Wins, and it sparkles',
+  auraWater: 'x2 Wins, and it splashes',
+  auraFire: 'x3 Wins, and it blazes',
+  auraRainbow: 'x5 Wins, in every colour',
+  sphinx: 'Limited: x150 Muscle pet',
 }
 
-/** Everything Wins can buy besides boards, eggs and Slide packs, grouped, with what it does. */
+/** Everything Wins can buy besides dumbbells, eggs and Muscle packs, grouped, with what it does. */
 export function StorePanel() {
   const passes = useGame((s) => s.profile.passes)
   const wins = useGame((s) => s.profile.wins)
@@ -61,7 +90,7 @@ export function StorePanel() {
                       </StrokeText>
                     </span>
                     <span className="whitespace-normal" style={{ fontSize: u(18), minHeight: u(44), margin: `${u(4)} 0` }}>
-                      <span style={{ color: '#3a2a10', fontFamily: 'system-ui, sans-serif', fontWeight: 700 }}>{BLURBS[id]}</span>
+                      <span style={{ color: '#5a3a10' }}>{BLURBS[id]}</span>
                     </span>
                     <ChunkyButton
                       gradient={owned ? GRADIENTS.greyButton : GRADIENTS.greenButton}

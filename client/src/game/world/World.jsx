@@ -7,18 +7,18 @@ import { glowTime } from '../glow'
 import { createToyMaterial, sharedMaterials, toyTime } from '../materials'
 import { createGroundGeometry, createGroundMap } from './ground'
 import { buildEggStands } from './eggs'
-import { buildHalloween } from './halloween'
+import { buildLawnCurbs } from './lawns'
 import { buildPortalFrame } from './portalFrame'
+import { buildPushZone } from './pushZone'
 import { createPaintedSigns } from './signs'
-import { buildSlideZone } from './slideZone'
-import { buildShop, buildTreadmills } from './structures'
-import { buildWaterfall } from './waterfall'
+import { buildShop, buildStands, buildStatue, buildTrainZones } from './structures'
 import { buildTerrain } from './terrain'
+import { buildWaterfall } from './waterfall'
 
 /**
- * The static lobby: ground plane, every box (hills, trees, treadmills, stages) in one
- * InstancedMesh, and every non-box prop (pads, rings...) merged into one mesh. Three
- * draw calls for the whole environment.
+ * The static lobby: ground plane, every box (mountains, trees, Train Zones, stages,
+ * stands, the statue) in one InstancedMesh, and every non-box prop (egg stands' wings...)
+ * merged into one mesh. Three draw calls for the whole environment.
  *
  * Built once. Quality only decides tree density at build time and whether the result
  * casts/receives realtime shadows.
@@ -62,12 +62,14 @@ export function World() {
     const { decorDensity, maxTexture } = useQuality.getState().settings
     const set = new BlockSet()
     buildTerrain(set, { treeDensity: decorDensity })
-    buildTreadmills(set)
+    buildLawnCurbs(set)
+    buildTrainZones(set)
     const propBuilder = new PropBuilder()
     buildShop(set, { detail: decorDensity >= 0.75 })
-    buildSlideZone(set, propBuilder, { detail: decorDensity >= 0.75 })
+    buildPushZone(set)
+    buildStands(set)
+    buildStatue(set, propBuilder)
     buildPortalFrame(set)
-    buildHalloween(set, { detail: decorDensity >= 0.75 })
     buildWaterfall(set)
     buildEggStands(set, propBuilder)
 

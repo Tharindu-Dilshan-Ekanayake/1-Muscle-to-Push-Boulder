@@ -21,15 +21,15 @@ import { normalizeProfile } from '../../shared/logic.js'
  * the one they're playing in now.
  */
 
-const DB_PATH = process.env.DB_PATH || fileURLToPath(new URL('../data/slide.db', import.meta.url))
+const DB_PATH = process.env.DB_PATH || fileURLToPath(new URL('../data/boulder.db', import.meta.url))
 
-const BOARDS = { rebirths: 'rebirths', playtime: 'playtime', distance: 'bestDistance' }
+const BOARDS = { rebirths: 'rebirths', muscle: 'bestMuscle', height: 'bestMeter' }
 
 const leaderboardFields = (profile) => ({
   name: profile.name,
   rebirths: profile.rebirths,
-  playtime: profile.stats.playtime,
-  bestDistance: profile.stats.bestDistance,
+  bestMuscle: profile.stats.bestMuscle,
+  bestMeter: profile.stats.bestMeter,
   updatedAt: profile.lastSeen,
 })
 
@@ -101,16 +101,16 @@ async function openSqlite(path) {
       name TEXT NOT NULL,
       data TEXT NOT NULL,
       rebirths INTEGER NOT NULL DEFAULT 0,
-      playtime REAL NOT NULL DEFAULT 0,
-      best_distance REAL NOT NULL DEFAULT 0,
+      best_muscle REAL NOT NULL DEFAULT 0,
+      best_meter REAL NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS profiles_rebirths ON profiles (rebirths DESC);
-    CREATE INDEX IF NOT EXISTS profiles_playtime ON profiles (playtime DESC);
-    CREATE INDEX IF NOT EXISTS profiles_distance ON profiles (best_distance DESC);
+    CREATE INDEX IF NOT EXISTS profiles_muscle ON profiles (best_muscle DESC);
+    CREATE INDEX IF NOT EXISTS profiles_meter ON profiles (best_meter DESC);
     CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `)
-  const columns = { rebirths: 'rebirths', playtime: 'playtime', distance: 'best_distance' }
+  const columns = { rebirths: 'rebirths', muscle: 'best_muscle', height: 'best_meter' }
   const readStock = () => {
     const row = db.prepare("SELECT value FROM kv WHERE key = 'sphinxStock'").get()
     return row ? Number(row.value) : SPHINX_STOCK_DEFAULT
@@ -124,13 +124,13 @@ async function openSqlite(path) {
     async save(profile) {
       const f = leaderboardFields(profile)
       db.prepare(
-        `INSERT INTO profiles (id, name, data, rebirths, playtime, best_distance, updated_at)
+        `INSERT INTO profiles (id, name, data, rebirths, best_muscle, best_meter, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name, data = excluded.data, rebirths = excluded.rebirths,
-           playtime = excluded.playtime, best_distance = excluded.best_distance,
+           best_muscle = excluded.best_muscle, best_meter = excluded.best_meter,
            updated_at = excluded.updated_at`,
-      ).run(profile.id, f.name, JSON.stringify(profile), f.rebirths, f.playtime, f.bestDistance, f.updatedAt)
+      ).run(profile.id, f.name, JSON.stringify(profile), f.rebirths, f.bestMuscle, f.bestMeter, f.updatedAt)
       return true
     },
     async top(limit) {

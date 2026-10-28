@@ -23,7 +23,7 @@ export function ItemsPanel() {
   const now = useNow(1000)
   const owned = Object.keys(ITEMS).filter((id) => (items[id] || 0) > 0)
   const active = [
-    ['potionSlide', 'x2 Slide', boosts.slide],
+    ['potionMuscle', 'x2 Muscle', boosts.muscle],
     ['potionWins', 'x2 Wins', boosts.wins],
   ].filter(([, , end]) => end > now)
 

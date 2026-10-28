@@ -1,33 +1,51 @@
 import { useFrame } from '@react-three/fiber'
-import { Suspense, useEffect, useMemo, useRef } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Quaternion, Vector3 } from 'three'
 
-import { isTreadmillUnlocked } from '@shared/logic'
-import { clampToWalkable, groundHeightAt, STATIC_COLLIDERS, treadmillAt } from '@shared/world'
+import { walkSpeed } from '@shared/balance'
+import { isZoneUnlocked } from '@shared/logic'
+import {
+  BENCH_X,
+  benchAt,
+  benchSeatZ,
+  clampToWalkable,
+  groundHeightAt,
+  SEAT_YAW,
+  STATIC_COLLIDERS,
+  ZONE_HEIGHT,
+  zoneAt,
+} from '@shared/world'
 
 import { sfx } from '../audio/sfx'
+import { prefetchLook } from '../bloxity/avatarLoader'
+import { useBloxity } from '../bloxity/BloxityContext'
 import { getGame } from '../store/game'
-import { getQuality } from '../store/quality'
 import ErrorBoundary from '../ui/ErrorBoundary'
-import { createBoardModel } from './board'
+import { createHeldDumbbell, disposeDumbbellMesh } from './dumbbell'
 import FallbackAvatar from './FallbackAvatar'
-import PlayerAvatar from './PlayerAvatar'
+import PlayerAvatar, { AvatarShaderWarmup } from './PlayerAvatar'
+import { bulkFor, growBody } from './playerPose'
+import { advancePush, push, walkSafezone } from './push/pushControl'
 import { runtime } from './runtime'
-import { BOARD_QUAT, LEAP, riderBody, rideTurn, standSide } from './slide/path'
-import { advanceSlide, slide } from './slide/slideControl'
 import useKeyboard from './useKeyboard'
 
 export const PLAYER_HEIGHT = 1.8
 const RADIUS = 0.45
 
-const WALK_SPEED = 10.875
 const ACCELERATION = 16
 const GRAVITY = 32
 const JUMP_SPEED = 10.5
 /** Ledges up to this high are walked straight onto (the shop's back stage). */
 const STEP_UP = 1.05
-/** Facing the console at a treadmill's west end. */
-const TREADMILL_YAW = -Math.PI / 2
+/** A click's curl takes this long. */
+const CURL_MS = 380
+/** Facing up the track, at the boulder; at the top, turned to the camera at your side. */
+const UPHILL_YAW = Math.PI
+const CHEER_YAW = Math.PI / 2
+/** At the top, the cheer comes in over this long. */
+const CHEER_IN = 0.5
+/** The win dance lasts this long, unless you move off sooner. */
+const DANCE_MS = 4500
 
 // Scratch objects, reused each frame so the loop allocates nothing.
 const _input = new Vector3()
@@ -37,15 +55,8 @@ const _camRight = new Vector3()
 const _targetQuat = new Quaternion()
 const _up = new Vector3(0, 1, 0)
 const _clamped = { x: 0, z: 0 }
-
-/** In the lobby, standing on the SLIDE ZONE, the board hovers ready this far ahead. */
-const READY_AHEAD = new Vector3(0, 0.3, -LEAP)
-const _launchFrom = new Quaternion()
-/** 0 -> 1 with a springy overshoot, for things popping into view. */
-const easeOutBack = (x) => {
-  const t = Math.min(1, Math.max(0, x)) - 1
-  return 1 + 2.70158 * t * t * t + 1.70158 * t * t
-}
+/** Push input, handed to the push each frame. */
+const pushInput = { forward: 0, back: 0, side: 0 }
 
 /** Pushes a circle out of an axis-aligned rect. Returns true on contact. */
 function pushOut(pos, rect) {
@@ -58,9 +69,9 @@ function pushOut(pos, rect) {
 
   if (d2 > 1e-8) {
     const d = Math.sqrt(d2)
-    const push = (RADIUS - d) / d
-    pos.x += dx * push
-    pos.z += dz * push
+    const shove = (RADIUS - d) / d
+    pos.x += dx * shove
+    pos.z += dz * shove
     return true
   }
 
@@ -81,45 +92,74 @@ function pushOut(pos, rect) {
 /**
  * The local player: a kinematic character controller.
  *
- * No physics engine: the world is flat ground, a few raised floors and a list of
+ * No physics engine: the plaza is flat ground, a few raised floors and a list of
  * rectangular walls, which a circle-vs-rect push-out handles exactly. That saves the
  * ~2 MB Rapier WASM download and keeps the active rigid body count at zero.
  *
- * While you slide, your logical position stays on the SLIDE ZONE (what the server
- * checks) and only the drawn character rides the board down the hill. On a treadmill
- * you run on the spot, facing its console.
+ * In the plaza you walk and curl your dumbbell when you click. Step onto a Train Zone's
+ * pad and you walk yourself to its long bench, sit and curl on a loop, until you move
+ * or jump (walking into the bench sits you too). Up the mountain
+ * you push a boulder - forward drives it, sideways steers -
+ * and between pushes you walk about the SAFEZONE you've reached, just as in the plaza.
+ * Your logical position stays on the PUSH ZONE all the while (it's what the server
+ * checks); only the drawn character climbs the mountain.
  *
  * Reads and writes `runtime.player`; never touches React state per frame.
  *
  * @param {{ onAvatarReady?: () => void }} props
  */
 export function Player({ onAvatarReady }) {
+  const { avatar } = useBloxity()
+  // Your clothes start downloading now, not once the body has.
+  useEffect(() => prefetchLook(avatar), [avatar])
+  const [avatarIn, setAvatarIn] = useState(false)
+  const handleAvatarReady = useCallback(() => {
+    setAvatarIn(true)
+    onAvatarReady?.()
+  }, [onAvatarReady])
   const groupRef = useRef(null)
   const visualRef = useRef(null)
-  const boardRef = useRef(null)
+  const handRef = useRef(null)
+  const heldRef = useRef(null)
   const keys = useKeyboard()
   const velocity = useRef(new Vector3())
   const vy = useRef(0)
-  const wasSliding = useRef(false)
-  /**
-   * This slide's bits Player keeps: whether the board was already out, the skid's side,
-   * the ready hover (0-1) and how far into the jump pose (0-1).
-   */
-  const ride = useRef({ popped: false, side: 1, ready: 0, air: 0 })
-  const board = useMemo(() => createBoardModel(), [])
+  const wasPushing = useRef(false)
+  const dumbbell = useMemo(() => createHeldDumbbell(), [])
 
   /** Handed to the avatar so it can pose itself. A ref: written every frame. */
   const motionRef = useRef({
     time: 0,
     speed: 0,
     grounded: true,
-    maxSpeed: WALK_SPEED,
+    maxSpeed: walkSpeed(),
     vy: 0,
     stride: 0,
-    sliding: false,
+    pushing: false,
+    effort: 0,
+    strain: 0,
+    crushed: 0,
+    cheer: 0,
+    curl: 0,
+    training: false,
+    sitting: false,
+    dance: 0,
+    bulk: -1,
   })
+  /** The Train Zone whose bench you're sat on, or -1, and where along it. */
+  const seated = useRef(-1)
+  const seatedZ = useRef(0)
+  /** The bench you just got up from: you don't sit back down until you've stepped off it. */
+  const leftSeat = useRef(-1)
+  /** Still holding the move you walked onto the bench with: that one doesn't get you up. */
+  const sitHeld = useRef(false)
+  /** The Train Zone whose pad you're on (-1 off them), and whose bench you're walking to. */
+  const onPad = useRef(-1)
+  const toBench = useRef(-1)
+  /** Still holding the move you stepped onto the pad with: that one doesn't stop the walk. */
+  const padHeld = useRef(false)
 
-  // The blob shadow follows what's drawn, which is down the hill while you slide.
+  // The blob shadow follows what's drawn, which is up the track while you push.
   const shownAt = useMemo(() => new Vector3().copy(runtime.player.position), [])
   useEffect(() => {
     const caster = { position: shownAt, size: 1.1 }
@@ -127,7 +167,7 @@ export function Player({ onAvatarReady }) {
     return () => runtime.shadowCasters.delete(caster)
   }, [shownAt])
 
-  useEffect(() => () => board.dispose(), [board])
+  useEffect(() => () => disposeDumbbellMesh(dumbbell), [dumbbell])
 
   useFrame((state, rawDelta) => {
     const delta = Math.min(rawDelta, 0.05)
@@ -136,95 +176,107 @@ export function Player({ onAvatarReady }) {
     const k = keys.current
     const joy = runtime.input
     const motion = motionRef.current
+    const profile = getGame().profile
     motion.time += delta
+    growBody(motion, bulkFor(profile.muscle), delta)
 
     const group = groupRef.current
     const visual = visualRef.current
-    const b = boardRef.current
+    const held = heldRef.current
+    held?.setDumbbell(profile.equippedDumbbell)
 
-    // --- Riding the slide ------------------------------------------------------
-    if (slide.active && group && visual && b) {
-      advanceSlide(state.clock.elapsedTime)
-      if (!wasSliding.current) {
-        // Pressed SLIDE: remember which way you faced, and whether the board was
-        // already out (hovering ready) or has to pop out now.
-        wasSliding.current = true
-        _launchFrom.copy(visual.quaternion)
-        ride.current.popped = b.visible
-        ride.current.side = standSide(slide.distance)
+    // --- Pushing a boulder --------------------------------------------------------
+    const free = push.active && push.phase === 'free'
+    if (push.active && !free && group && visual) {
+      pushInput.forward = Math.max(k.forward ? 1 : 0, joy.joyY > 0.2 ? Math.min(1, joy.joyY * 1.3) : 0)
+      pushInput.back = Math.max(k.backward ? 1 : 0, joy.joyY < -0.35 ? 1 : 0)
+      pushInput.side = Math.max(-1, Math.min(1, (k.right ? 1 : 0) - (k.left ? 1 : 0) + joy.joyX))
+      advancePush(delta, pushInput)
+      if (!push.active) return
+      if (!wasPushing.current) {
+        wasPushing.current = true
+        velocity.current.set(0, 0, 0)
+        vy.current = 0
+        visual.quaternion.setFromAxisAngle(_up, UPHILL_YAW)
       }
-      player.anim = 'slide'
+      player.anim = 'push'
       player.speed = 0
-      velocity.current.set(0, 0, 0)
-      vy.current = 0
-      // The group is the board's underside: skids and leans turn the board and rider together.
-      group.position.copy(slide.position)
-      rideTurn(slide, group.quaternion)
-      shownAt.copy(slide.position)
-
-      b.visible = true
-      b.position.set(0, 0, 0)
-      b.quaternion.copy(BOARD_QUAT)
-      b.scale.setScalar(ride.current.popped ? 1 : easeOutBack(slide.launch / 0.35))
-      b.setBoard(getGame().profile.equippedBoard)
-      b.setGlowSize(2.6 * getQuality().boardGlow)
-
-      // Diving on, lying on it, getting up to cheer: placed on the board's frame.
-      riderBody(slide, group.quaternion, _launchFrom, ride.current.side, visual.position, visual.quaternion)
-      // In the air: spread out (eased in and out); landing: a squash. On the ground at
-      // speed the board shudders a little.
-      const r = ride.current
-      r.air += ((slide.airborne ? 1 : 0) - r.air) * (1 - Math.exp(-10 * delta))
-      const sinceLanding = performance.now() - slide.landedAt
-      const squash = slide.landedAt > 0 && sinceLanding < 450 ? Math.exp(-sinceLanding / 110) : 0
-      group.scale.set(1 + 0.1 * squash, 1 - 0.16 * squash, 1 + 0.1 * squash)
-      const shudder = slide.phase === 'ride' && !slide.airborne ? Math.min(1, slide.speed / 150) * 0.018 : 0
-      b.position.y = Math.sin(state.clock.elapsedTime * 47) * shudder
-      motion.sliding = true
-      motion.launch = slide.launch
-      motion.stand = slide.stand
-      motion.air = r.air
-      motion.speed = slide.phase === 'ride' ? slide.speed : 0
+      group.position.copy(push.position)
+      _targetQuat.setFromAxisAngle(_up, push.phase === 'top' ? CHEER_YAW : UPHILL_YAW)
+      visual.quaternion.slerp(_targetQuat, 1 - Math.pow(0.001, delta))
+      // Crushed: squashed flat under the boulder as it rolls over you.
+      const c = push.phase === 'crushed' ? Math.min(1, Math.max(0, (push.crush - 0.45) / 0.3)) : 0
+      group.scale.set(1 + 0.35 * c, 1 - 0.88 * c, 1 + 0.35 * c)
+      shownAt.copy(push.position)
+      if (held) held.visible = false
+      motion.pushing = true
+      motion.speed = push.speed
+      motion.maxSpeed = 6.5
+      motion.effort = push.effort
+      motion.strain = push.strain
+      motion.crushed = c
+      motion.cheer = push.phase === 'top' ? Math.min(1, motion.cheer + delta / CHEER_IN) : 0
       motion.grounded = true
+      motion.training = false
+      motion.curl = 0
+      motion.stride += delta * (4 + 5 * Math.min(1, Math.abs(push.speed) / 6.5))
       return
     }
-    if (wasSliding.current && group && visual && b) {
-      // Back at the top: stand up where the slide control put you.
-      wasSliding.current = false
-      visual.position.set(0, 0, 0)
-      visual.quaternion.setFromAxisAngle(_up, player.yaw)
-      group.position.copy(pos)
-      group.quaternion.identity()
+    if (wasPushing.current && group && visual) {
+      // Off the boulder: back in the plaza, or free in a SAFEZONE facing on up.
+      wasPushing.current = false
+      velocity.current.set(0, 0, 0)
+      vy.current = 0
+      if (free) player.yaw = UPHILL_YAW
+      group.position.copy(free ? push.position : pos)
       group.scale.set(1, 1, 1)
-      ride.current.air = 0
-      motion.air = 0
-      b.visible = false
-      b.scale.setScalar(1)
-      motion.sliding = false
-      motion.launch = 1
-      motion.stand = 0
+      visual.quaternion.setFromAxisAngle(_up, player.yaw)
+      motion.pushing = false
+      motion.crushed = 0
+      motion.cheer = 0
+      motion.strain = 0
     }
+    if (held) held.visible = true
 
-    // --- Ready to slide: the board hovers in front of you on the SLIDE ZONE ------
-    if (b) {
-      const ready = getGame().zone.slideZone && !player.frozen
-      const r = ride.current
-      r.ready = ready ? Math.min(1, r.ready + delta * 4) : Math.max(0, r.ready - delta * 6)
-      b.visible = r.ready > 0
-      if (b.visible) {
-        const t = state.clock.elapsedTime
-        b.position.copy(READY_AHEAD)
-        b.position.y += Math.sin(t * 3) * 0.08
-        b.quaternion.setFromAxisAngle(_up, Math.sin(t * 1.3) * 0.25)
-        b.scale.setScalar(easeOutBack(r.ready))
-        b.setBoard(getGame().profile.equippedBoard)
-        b.setGlowSize(2.6 * getQuality().boardGlow)
-      }
+    // Walking: in the plaza, or about a SAFEZONE (where the plaza position stays put).
+    const at = free ? push.position : pos
+    const locked = !free && player.frozen
+    const moving = (k.forward || k.backward || k.left || k.right || Math.hypot(joy.joyX, joy.joyY) > 0.02) && !locked
+
+    // --- On a bench: sat still, training, until you move (a fresh press) or jump -------
+    if (!moving) sitHeld.current = false
+    const getUp = (moving && !sitHeld.current) || k.jump || joy.jump
+    if (seated.current >= 0 && (free || getUp || !isZoneUnlocked(profile, seated.current))) {
+      leftSeat.current = seated.current
+      seated.current = -1
     }
+    if (seated.current >= 0) {
+      at.set(BENCH_X, ZONE_HEIGHT, seatedZ.current)
+      velocity.current.set(0, 0, 0)
+      vy.current = 0
+      player.grounded = true
+      player.yaw = SEAT_YAW
+      if (visual) visual.quaternion.slerp(_targetQuat.setFromAxisAngle(_up, SEAT_YAW), 1 - Math.pow(0.0005, delta))
+      if (group) group.position.copy(at)
+      shownAt.copy(at)
+      player.bench = seated.current
+      player.speed = 0
+      player.anim = 'train'
+      motion.speed = 0
+      motion.grounded = true
+      motion.vy = 0
+      motion.sitting = true
+      motion.training = true
+      motion.curl = 0
+      return
+    }
+    player.bench = -1
+    motion.sitting = false
 
     // --- Input, relative to the camera ----------------------------------------
+    const maxSpeed = walkSpeed(profile.level, profile.rebirths)
     _input.set(0, 0, 0)
-    if (!player.frozen) {
+    if (!locked) {
       _input.set(
         (k.right ? 1 : 0) - (k.left ? 1 : 0) + joy.joyX,
         0,
@@ -233,7 +285,21 @@ export function Player({ onAvatarReady }) {
     }
     const inputLength = Math.min(1, _input.length())
 
-    if (inputLength > 0.02) {
+    // Just stepped onto an unlocked Train Zone's pad: off to its bench, until a fresh
+    // move or a jump takes over (or you leave the pad).
+    const pad = free || locked ? -1 : zoneAt(at.x, at.z)
+    if (pad !== onPad.current) {
+      onPad.current = pad
+      toBench.current = pad >= 0 && isZoneUnlocked(profile, pad) ? pad : -1
+      padHeld.current = moving
+    }
+    if (!moving) padHeld.current = false
+    if (toBench.current >= 0 && ((moving && !padHeld.current) || k.jump || joy.jump)) toBench.current = -1
+
+    if (toBench.current >= 0) {
+      _move.set(BENCH_X - at.x, 0, benchSeatZ(toBench.current, at.z) - at.z)
+      if (_move.lengthSq() > 1e-4) _move.normalize().multiplyScalar(maxSpeed * 0.75)
+    } else if (inputLength > 0.02) {
       _input.normalize()
       // Flatten the camera's forward onto the ground plane so "up" always means
       // "away from the camera".
@@ -246,7 +312,7 @@ export function Player({ onAvatarReady }) {
         .addScaledVector(_camForward, -_input.z)
         .addScaledVector(_camRight, _input.x)
         .normalize()
-        .multiplyScalar(WALK_SPEED * inputLength)
+        .multiplyScalar(maxSpeed * inputLength)
     } else {
       _move.set(0, 0, 0)
     }
@@ -256,53 +322,54 @@ export function Player({ onAvatarReady }) {
     velocity.current.lerp(_move, blend)
 
     // --- Horizontal move + collision --------------------------------------------
-    const prevX = pos.x
-    const prevZ = pos.z
-    pos.x += velocity.current.x * delta
-    pos.z += velocity.current.z * delta
+    const prevX = at.x
+    const prevZ = at.z
+    at.x += velocity.current.x * delta
+    at.z += velocity.current.z * delta
 
-    for (const rect of STATIC_COLLIDERS) pushOut(pos, rect)
-    for (const rect of runtime.dynamicColliders) pushOut(pos, rect)
-    clampToWalkable(pos.x, pos.z, _clamped)
-    pos.x = _clamped.x
-    pos.z = _clamped.z
+    let floor
+    if (free) {
+      floor = walkSafezone(at)
+    } else {
+      for (const rect of STATIC_COLLIDERS) pushOut(at, rect)
+      for (const rect of runtime.dynamicColliders) pushOut(at, rect)
+      clampToWalkable(at.x, at.z, _clamped)
+      at.x = _clamped.x
+      at.z = _clamped.z
 
-    // A ledge too tall to step onto acts as a wall.
-    let floor = groundHeightAt(pos.x, pos.z)
-    if (floor - pos.y > STEP_UP) {
-      pos.x = prevX
-      pos.z = prevZ
-      floor = groundHeightAt(pos.x, pos.z)
+      // A ledge too tall to step onto acts as a wall.
+      floor = groundHeightAt(at.x, at.z)
+      if (floor - at.y > STEP_UP) {
+        at.x = prevX
+        at.z = prevZ
+        floor = groundHeightAt(at.x, at.z)
+      }
     }
 
     // --- Vertical ---------------------------------------------------------------
-    const wantJump = !player.frozen && (k.jump || joy.jump)
+    const wantJump = !locked && (k.jump || joy.jump)
     if (wantJump && player.grounded) {
       vy.current = JUMP_SPEED
       player.grounded = false
       sfx.jump()
     }
     vy.current -= GRAVITY * delta
-    pos.y += vy.current * delta
+    at.y += vy.current * delta
 
-    if (pos.y <= floor) {
+    if (at.y <= floor) {
       // Coming down from a jump (not just stepping off a kerb) lands with a thump.
       if (!player.grounded && vy.current < -5) sfx.jumpLand()
-      pos.y = floor
+      at.y = floor
       vy.current = 0
       player.grounded = true
-    } else if (pos.y - floor > 0.05) {
+    } else if (at.y - floor > 0.05) {
       // Walked off a ledge, or still rising from a jump.
       player.grounded = false
     }
 
     // --- Facing -----------------------------------------------------------------
     const speed = Math.hypot(velocity.current.x, velocity.current.z)
-    // Standing still on an unlocked treadmill: run on the spot, facing its console.
-    const tread = treadmillAt(pos.x, pos.z)
-    const running = tread >= 0 && player.grounded && speed < 0.5 && !player.frozen && isTreadmillUnlocked(getGame().profile, tread)
-    if (running) player.yaw = TREADMILL_YAW
-    else if (speed > 0.3) player.yaw = Math.atan2(velocity.current.x, velocity.current.z)
+    if (speed > 0.3) player.yaw = Math.atan2(velocity.current.x, velocity.current.z)
     if (visual) {
       _targetQuat.setFromAxisAngle(_up, player.yaw)
       visual.quaternion.slerp(_targetQuat, 1 - Math.pow(0.0005, delta))
@@ -310,36 +377,62 @@ export function Player({ onAvatarReady }) {
     if (group) {
       // Step-ups ease in over a few frames on the visual only; the logical position
       // snaps so collision and triggers stay exact.
-      const steppingUp = player.grounded && pos.y > group.position.y
+      const steppingUp = player.grounded && at.y > group.position.y
       const visualY = steppingUp
-        ? group.position.y + (pos.y - group.position.y) * Math.min(1, delta * 18)
-        : pos.y
-      group.position.set(pos.x, visualY, pos.z)
+        ? group.position.y + (at.y - group.position.y) * Math.min(1, delta * 18)
+        : at.y
+      group.position.set(at.x, visualY, at.z)
     }
-    shownAt.copy(pos)
+    shownAt.copy(at)
+
+    // Walked into a bench in an unlocked Train Zone: sit on it there (from next frame).
+    // Off the bench you got up from (jumping off it doesn't count), you may sit again.
+    const bench = free || locked ? -1 : benchAt(at.x, at.z)
+    if (bench !== leftSeat.current) leftSeat.current = -1
+    if (bench >= 0 && player.grounded && bench !== leftSeat.current && isZoneUnlocked(profile, bench)) {
+      seated.current = bench
+      seatedZ.current = benchSeatZ(bench, at.z)
+      sitHeld.current = moving
+      toBench.current = -1
+    }
+
+    // Back from a win: dancing on the spot until it's over or you move off.
+    if (player.danceAt && (free || moving || !player.grounded || performance.now() - player.danceAt > DANCE_MS)) player.danceAt = 0
+    const dancing = player.danceAt > 0
 
     // --- Publish motion ---------------------------------------------------------
-    player.speed = speed
-    player.anim = !player.grounded ? 'jump' : running ? 'run' : speed > 0.5 ? 'walk' : 'idle'
+    // Up the mountain, others see you from where you are there, not in the plaza.
+    player.speed = free ? 0 : speed
+    player.anim = free ? 'push' : !player.grounded ? 'jump' : dancing ? 'dance' : speed > 0.5 ? 'walk' : 'idle'
 
-    const shownSpeed = running ? WALK_SPEED : speed
-    motion.speed = shownSpeed
+    const sinceLift = performance.now() - player.liftedAt
+    motion.speed = speed
+    motion.maxSpeed = maxSpeed
     motion.grounded = player.grounded
     motion.vy = vy.current
+    motion.training = false
+    motion.dance = dancing ? 1 : 0
+    motion.curl = sinceLift < CURL_MS ? sinceLift / CURL_MS : 0
     // Steps quicken with speed: the stride phase runs faster rather than jumping.
-    motion.stride += delta * (5 + 6 * Math.min(1, shownSpeed / WALK_SPEED))
+    motion.stride += delta * (5 + 6 * Math.min(1, speed / maxSpeed))
   })
 
   return (
     <group ref={groupRef}>
       <group ref={visualRef}>
-        <ErrorBoundary fallback={<FallbackAvatar motionRef={motionRef} onReady={onAvatarReady} />}>
-          <Suspense fallback={<FallbackAvatar motionRef={motionRef} />}>
-            <PlayerAvatar onReady={onAvatarReady} targetHeight={PLAYER_HEIGHT} motionRef={motionRef} />
+        {/* The loading screen waits for your Bloxity avatar; only if it can't be had in
+            time (or at all) does the blocky stand-in show in its place. */}
+        {!avatarIn && <FallbackAvatar motionRef={motionRef} handRef={handRef} />}
+        <AvatarShaderWarmup />
+        <ErrorBoundary fallback={<FallbackAvatar motionRef={motionRef} handRef={handRef} onReady={handleAvatarReady} />}>
+          <Suspense fallback={null}>
+            <PlayerAvatar onReady={handleAvatarReady} targetHeight={PLAYER_HEIGHT} motionRef={motionRef} handRef={handRef} />
           </Suspense>
         </ErrorBoundary>
+        <group ref={handRef}>
+          <primitive ref={heldRef} object={dumbbell} />
+        </group>
       </group>
-      <primitive ref={boardRef} object={board} visible={false} />
     </group>
   )
 }

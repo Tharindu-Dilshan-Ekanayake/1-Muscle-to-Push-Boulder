@@ -30,14 +30,21 @@ export function buildEggStands(blocks, props) {
       }
       continue
     }
-    blocks.addOn(stand.x, 0, stand.z, 3.2, 0.55, 3.2, '#2f7fe6')
-    blocks.addOn(stand.x, 0.55, stand.z, 2.8, 0.35, 2.8, '#f4f7fb')
-    // A ring of light on the top, in the egg's colour, and gold studs at its corners.
+    // An octagonal pedestal (two squares turned an eighth apart): a blue base, a band of
+    // light in the egg's colour, a white plinth, and a glowing cushion the egg floats over.
     const ring = RING[stand.eggId] || RING.basic
-    for (const side of [-1, 1]) {
-      blocks.addOn(stand.x, 0.9, stand.z + side * 1.05, 2.1, 0.06, 0.2, ring, STYLE.GLOW)
-      blocks.addOn(stand.x + side * 1.05, 0.9, stand.z, 0.2, 0.06, 1.9, ring, STYLE.GLOW)
-      for (const end of [-1, 1]) blocks.addOn(stand.x + side * 1.25, 0.9, stand.z + end * 1.25, 0.3, 0.16, 0.3, '#ffd21f', STYLE.GLOW)
+    for (const turn of [0, Math.PI / 4]) {
+      blocks.addOn(stand.x, 0, stand.z, 3.4, 0.42, 3.4, '#2f7fe6', STYLE.STUDS, turn)
+      blocks.addOn(stand.x, 0.42, stand.z, 3.1, 0.12, 3.1, ring, STYLE.GLOW, turn)
+      blocks.addOn(stand.x, 0.54, stand.z, 2.8, 0.34, 2.8, '#f4f7fb', STYLE.SMOOTH, turn)
+    }
+    blocks.addOn(stand.x, 0.88, stand.z, 1.3, 0.1, 1.3, ring, STYLE.GLOW, Math.PI / 4)
+    // Gold posts with glowing tips at four of its corners.
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        blocks.addOn(stand.x + sx * 1.2, 0.42, stand.z + sz * 1.2, 0.22, 0.9, 0.22, '#ffd21f', STYLE.SMOOTH)
+        blocks.add(stand.x + sx * 1.2, 1.42, stand.z + sz * 1.2, 0.3, 0.3, 0.3, ring, STYLE.GLOW, 0.785, 0.6, 0)
+      }
     }
   }
 

@@ -1,13 +1,13 @@
-# Ships +1 Slide Downhill to Bloxity Legion: the dev branch to the dev channel, main to prod.
+# Ships +1 Muscle to Push Boulder to Bloxity Legion: the dev branch to the dev channel, main to prod.
 #
 #   server   -> Docker image in this repo's GitHub Container Registry, then Legion rolls
-#               it out (https://1-slide-downhill.host.bloxity.io / .dev.host.bloxity.io)
-#   frontend -> the built client, served at https://1-slide-downhill.play.bloxity.io
-#               (prod) and https://1-slide-downhill.dev.play.bloxity.io (dev)
+#               it out (https://1-muscle-to-push-boulder.host.bloxity.io / .dev.host.bloxity.io)
+#   frontend -> the built client, served at https://1-muscle-to-push-boulder.play.bloxity.io
+#               (prod) and https://1-muscle-to-push-boulder.dev.play.bloxity.io (dev)
 #
 # Needs one repository secret: LEGION_DEPLOY_TOKEN (Settings -> Secrets and variables
 # -> Actions). After the first run, make the ghcr.io package public so Legion can pull
-# it (repo -> Packages -> 1-slide-downhill-server -> Package settings -> Change visibility).
+# it (repo -> Packages -> 1-muscle-to-push-boulder-server -> Package settings -> Change visibility).
 
 name: Deploy to Bloxity Legion
 
@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
 
 env:
-  GAME_ID: 1-slide-downhill
+  GAME_ID: 1-muscle-to-push-boulder
   # Players per room (the Colyseus room's maxClients); a full pod makes Legion start another.
   SEAT_CAP: 8
 

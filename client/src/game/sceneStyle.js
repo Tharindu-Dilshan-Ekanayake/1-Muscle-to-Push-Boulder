@@ -1,13 +1,14 @@
 /**
  * The scene's whole look in one place: a bright toy-brick world with a saturated blue
- * sky, pale lime studded plaza, tan paths and terraced dirt hills with grass caps.
+ * sky, a light-blue studded baseplate with lime lawns and orange dirt patches, grey
+ * voxel mountains all round and terracotta cliffs either side of the boulder track.
  *
  * Colours are sRGB hex, exactly as you would pick them in an image editor.
  *
  * Light intensities are three.js physical units: a light of intensity PI (~3.14)
  * lights a surface facing it to its full texture colour. The hemisphere fill plus the
- * sun add up to just over that on the ground, which is what keeps the greens vivid;
- * shadowed ground only gets the fill, so shadows read as a softer, darker green.
+ * sun add up to just over that on the ground, which is what keeps the colours vivid;
+ * shadowed ground only gets the fill, so shadows read as a softer, darker shade.
  */
 
 export const SKY = {
@@ -32,17 +33,21 @@ export const CLOUDS = {
 
 /** Every surface colour in the lobby. */
 export const PALETTE = {
-  plaza: '#c3ec86',
-  path: '#f3d57e',
-  pathEdge: '#e5a94f',
-  apron: '#acdff5',
-  apronEdge: '#e6f6fd',
-  shopFloor: '#e7eef6',
-  lawn: '#66cf4b',
-  sidewalk: '#dadada',
-  dirt: '#c99a5f',
+  /** The baseplate: light blue studs, as in the reference. */
+  plaza: '#a4cdee',
+  /** Raised kerbs round the lawns, and the darker edge painted along them. */
+  curb: '#c3d8ec',
+  curbEdge: '#8fb4d8',
+  lawn: '#62e23d',
+  dirt: '#f59a4f',
+  apron: '#d7e4f0',
+  apronEdge: '#eef5fb',
+  shopFloor: '#aab4bf',
+  /** Grey voxel mountains, and the terracotta cliffs either side of the track. */
+  rock: ['#9a9fa6', '#8a8f96', '#a9adb2'],
+  cliff: '#c4774a',
   trunk: '#7c4d29',
-  leaves: ['#33cc3a', '#3fd63f', '#2ec236'],
+  leaves: ['#2fc53a', '#3ad646', '#27b134'],
   white: '#f4f7fb',
   water: '#4cc3ff',
 }

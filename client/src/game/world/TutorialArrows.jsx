@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { Matrix4, Quaternion, Vector3 } from 'three'
 
 import { TUTORIAL } from '@shared/balance'
-import { BELT_NEAR_X, BOARD_PADS, EGG_STANDS, groundHeightAt, SLIDE_ZONE, treadmillCenterZ } from '@shared/world'
+import { DUMBBELL_PADS, EGG_STANDS, groundHeightAt, PUSH_ZONE, ZONE_HALF, ZONE_X, zoneCenterZ } from '@shared/world'
 
 import { getGame } from '../../store/game'
 import { createToyInstances, PropBuilder } from '../blocks'
@@ -17,9 +17,9 @@ const ARRIVED = 3.5
 
 /** Ground point each tutorial step leads to. */
 const TARGETS = {
-  slide: { x: 0, z: (SLIDE_ZONE.minZ + SLIDE_ZONE.maxZ) / 2 },
-  tread0: { x: BELT_NEAR_X - 3, z: treadmillCenterZ(0) },
-  boards: { x: BOARD_PADS[1].x, z: BOARD_PADS[1].z },
+  push: { x: 0, z: (PUSH_ZONE.minZ + PUSH_ZONE.maxZ) / 2 },
+  zone0: { x: ZONE_X + ZONE_HALF.x - 3, z: zoneCenterZ(0) },
+  dumbbells: { x: DUMBBELL_PADS[1].x, z: DUMBBELL_PADS[1].z },
   eggs: { x: EGG_STANDS[0].x, z: EGG_STANDS[0].z - 3.5 },
 }
 
@@ -60,11 +60,11 @@ export function TutorialArrows() {
   useFrame((state) => {
     const instanced = ref.current
     if (!instanced) return
-    const { profile, slide } = getGame()
+    const { profile, pushing } = getGame()
     const step = TUTORIAL[profile.tutorialStep]
     const target = step && TARGETS[step.target]
     const player = runtime.player.position
-    if (!target || slide || runtime.camera.mode !== 'follow') {
+    if (!target || pushing || runtime.camera.mode !== 'follow') {
       instanced.count = 0
       return
     }
@@ -84,7 +84,7 @@ export function TutorialArrows() {
     for (let d = 1.6 + offset; d < dist - 1 && count < MAX_CHEVRONS; d += SPACING) {
       const x = player.x + ux * d
       const z = player.z + uz * d
-      // Over the treadmill decks and shop stages, not under them.
+      // Over the Train Zone pads and shop stages, not under them.
       _p.set(x, groundHeightAt(x, z) + 0.06, z)
       // Fade in near the player, shrink near the goal.
       const scale = Math.min(1, (d - 1.2) / 1.5) * Math.min(1, (dist - d) / 2)

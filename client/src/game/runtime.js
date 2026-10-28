@@ -14,14 +14,20 @@ import { SPAWN } from '@shared/world'
 export const runtime = {
   player: {
     position: new Vector3(SPAWN.x, 0, SPAWN.z),
-    /** Facing, radians about +Y. PI faces north (-Z), towards the slide. */
+    /** Facing, radians about +Y. PI faces north (-Z), towards the boulder. */
     yaw: Math.PI,
     speed: 0,
     grounded: true,
-    /** 'idle' | 'walk' | 'run' (on a treadmill) | 'jump' | 'slide' - what other players see. */
+    /** The Train Zone whose bench you're sat on, or -1. */
+    bench: -1,
+    /** When the win dance (back in the lobby after cashing in) started; 0 when not dancing. */
+    danceAt: 0,
+    /** 'idle' | 'walk' | 'train' (sat on a bench) | 'jump' | 'push' | 'dance' - what other players see. */
     anim: 'idle',
-    /** Set when the controller should ignore input (sliding, cutscenes). */
+    /** Set when the controller should ignore input (pushing, cutscenes). */
     frozen: false,
+    /** performance.now() of the last lift, for the curl. */
+    liftedAt: 0,
   },
 
   /** Touch input, written by the on-screen joystick. -1..1, +y = forward. */
@@ -32,7 +38,7 @@ export const runtime = {
   },
 
   camera: {
-    /** 'follow' orbits the player; 'slide' is driven by the slide (see slide/Slide.jsx). */
+    /** 'follow' orbits the player; 'push' is the chase camera up the track (see push/Push.jsx). */
     mode: 'follow',
     yaw: 0,
     pitch: 0.36,
@@ -41,8 +47,8 @@ export const runtime = {
     snap: false,
   },
 
-  /** What the sun's shadow box centres on while the camera chases you down the hill. */
-  flightFocus: null,
+  /** What the sun's shadow box centres on while the camera is up the track with you. */
+  focus: null,
 
   /**
    * Other players' pets, written by the multiplayer layer: `{ id, position, yaw, hop }`
@@ -50,13 +56,7 @@ export const runtime = {
    */
   remotePets: [],
 
-  /**
-   * Other players' slides to replay as ghost riders, by their session id:
-   * `{ distance, duration, boardId, x, z, startedAt }`.
-   */
-  ghostSlides: new Map(),
-
-  /** Walls that come and go at runtime, e.g. locked treadmills. */
+  /** Walls that come and go at runtime, e.g. locked Train Zones. */
   dynamicColliders: [],
 
   /**

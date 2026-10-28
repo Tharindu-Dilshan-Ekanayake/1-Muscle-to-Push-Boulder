@@ -19,7 +19,7 @@ const SHADOW_EXTENT = 28
  * (see BlobShadows), so the shadow pass costs nothing there.
  *
  * A directional light's shadow only covers a fixed box around its target, so the sun
- * and its target follow the player, down the hill too while sliding.
+ * and its target follow the player, up the mountain too while pushing.
  */
 export function Lighting() {
   const sunRef = useRef(null)
@@ -50,8 +50,8 @@ export function Lighting() {
   useFrame(() => {
     const sun = sunRef.current
     if (!sun) return
-    const p = runtime.camera.mode === 'slide' ? runtime.flightFocus ?? runtime.player.position : runtime.player.position
-    // Snap to whole units so the shadow map doesn't shimmer as the target slides.
+    const p = runtime.focus ?? runtime.player.position
+    // Snap to whole units so the shadow map doesn't shimmer as the target moves.
     sun.target.position.set(Math.round(p.x), Math.round(p.y), Math.round(p.z))
     sun.position.copy(sun.target.position).addScaledVector(SUN_DIRECTION, SUN_DISTANCE)
   })

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 
+import { prefetchLook } from './avatarLoader'
 import { BloxityContext } from './BloxityContext'
 import { getSDK, safeCall, toUnsubscribe, waitForSDK } from './sdk'
 import { DEFAULT_PROPORTIONS, useBloxityStore } from './store'
@@ -98,6 +99,14 @@ export function BloxityProvider({ gameSlug, children }) {
     let cancelled = false
 
     store.setStatus('loading')
+    // Whatever you're wearing starts downloading the moment it's known (a guest's
+    // default skin, straight away), so the game can open with your avatar dressed.
+    prefetchLook(store.equipped)
+    unsubscribers.push(
+      useBloxityStore.subscribe((state, prev) => {
+        if (state.equipped !== prev.equipped) prefetchLook(state.equipped)
+      }),
+    )
 
     initOnce(slug)
       .then((sdk) => {

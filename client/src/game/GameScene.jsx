@@ -4,8 +4,10 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { WebGLRenderer } from 'three'
 
 import { useBloxity } from '../bloxity/BloxityContext'
+import { useGame } from '../store/game'
 import { useQuality } from '../store/quality'
 import ErrorBoundary from '../ui/ErrorBoundary'
+import Auras from './Auras'
 import BlobShadows from './BlobShadows'
 import FollowCamera from './FollowCamera'
 import GainFX from './fx/GainFX'
@@ -14,9 +16,11 @@ import Pets, { RewardCrab, SphinxShowcase } from './pets/Pets'
 import RemoteAvatars from './remote/RemoteAvatars'
 import RemotePlayers from './remote/RemotePlayers'
 import Particles from './fx/Particles'
-import Leaderboards from './world/Leaderboards'
-import BoardShop from './world/BoardShop'
+import LiftInput from './LiftInput'
+import Boulders from './push/Boulders'
+import DumbbellShop from './world/DumbbellShop'
 import EggDisplays from './world/EggDisplays'
+import Leaderboards from './world/Leaderboards'
 import Portal from './world/Portal'
 import TutorialArrows from './world/TutorialArrows'
 import Lighting from './Lighting'
@@ -34,21 +38,53 @@ const DevPerf = import.meta.env.DEV
   : null
 const showDevPerf = import.meta.env.DEV && new URLSearchParams(window.location.search).has('perf')
 
-// The canyon down the hill is its own chunk, fetched once the lobby is on screen so it
+// The track up the mountain is its own chunk, fetched once the lobby is on screen so it
 // never delays time-to-playable.
-const Slide = lazy(() => import('./slide/Slide'))
+const Push = lazy(() => import('./push/Push'))
+
+/** The longest the loading screen waits for your avatar before the game opens anyway. */
+const AVATAR_WAIT_MS = 10000
+
+/**
+ * The scene's start-up, in a component of its own so each step re-renders only this,
+ * not the whole scene (seconds of work on a slow phone): every shader compiled
+ * (ShaderWarmup - last in the scene, so everything's in it), then the first real frame
+ * drawn (`onSceneIn`), then the track up the mountain, fetched only now so it never
+ * delays time-to-playable.
+ */
+function StartUp({ onSceneIn }) {
+  const world = useGame((s) => s.profile.world)
+  const [warmedUp, setWarmedUp] = useState(false)
+  const [firstFrame, setFirstFrame] = useState(false)
+  const handleWarmedUp = useCallback(() => setWarmedUp(true), [])
+  const handleFirstFrame = useCallback(() => setFirstFrame(true), [])
+  return (
+    <>
+      {warmedUp && firstFrame && (
+        <Suspense fallback={null}>
+          {/* Built afresh for each world's track (the ticker switches it first). */}
+          <Push key={world} />
+        </Suspense>
+      )}
+      <ShaderWarmup onDone={handleWarmedUp} />
+      {warmedUp && <FirstFrameSignal onFirstFrame={handleFirstFrame} onFirstFrameNow={onSceneIn} />}
+    </>
+  )
+}
 
 /**
  * Fires `onFirstFrame` after the renderer has actually drawn once.
  * "Ready" should mean "the player can see the game", not "React mounted".
  */
-function FirstFrameSignal({ onFirstFrame }) {
+function FirstFrameSignal({ onFirstFrame, onFirstFrameNow }) {
   const fired = useRef(false)
   useFrame(() => {
     if (fired.current) return
     fired.current = true
     performance.mark('pp:first-frame')
-    // Deferred: never update React state from inside the frame loop.
+    // Right away, what touches no React state (it may open the game); the rest deferred:
+    // never update React state from inside the frame loop.
+    onFirstFrameNow?.()
     setTimeout(onFirstFrame, 0)
   })
   return null
@@ -78,29 +114,41 @@ export function GameScene({ onReady }) {
   const antialias = useQuality((s) => s.antialias)
   const degrade = useQuality((s) => s.degrade)
 
-  const [warmedUp, setWarmedUp] = useState(false)
-  const [firstFrame, setFirstFrame] = useState(false)
   const [contextKey, setContextKey] = useState(0)
   const [contextLost, setContextLost] = useState(false)
   const readySent = useRef(false)
-
-  const handleWarmedUp = useCallback(() => setWarmedUp(true), [])
-  const handleFirstFrame = useCallback(() => setFirstFrame(true), [])
 
   useEffect(() => {
     game.loadingStep('Preparing scene…')
   }, [game])
 
-  // Playable once every shader is compiled and the first real frame is drawn. The
-  // player's own avatar streams in afterwards (a blocky stand-in shows meanwhile), so a
-  // slow avatar CDN never holds the game up.
-  useEffect(() => {
-    if (!warmedUp || !firstFrame || readySent.current) return
+  // Playable once every shader is compiled, the first real frame is drawn and your
+  // Bloxity avatar is in, dressed: the game opens with it, never a stand-in - unless the
+  // avatar CDN can't deliver it in AVATAR_WAIT_MS, which mustn't hold the game up.
+  // Refs, not state: none of it should re-render the whole scene.
+  const sceneIn = useRef(false)
+  const avatarIn = useRef(false)
+  // Called from the frame loop too (the first frame drawn), so the loading screen goes
+  // the moment the game's there; App's state is set after it.
+  const sendReady = useCallback(() => {
+    if (readySent.current || !sceneIn.current || !avatarIn.current) return
     readySent.current = true
     performance.mark('pp:ready')
     game.loadingEnd()
-    onReady?.()
-  }, [warmedUp, firstFrame, game, onReady])
+    setTimeout(() => onReady?.(), 0)
+  }, [game, onReady])
+  const handleAvatarReady = useCallback(() => {
+    avatarIn.current = true
+    sendReady()
+  }, [sendReady])
+  useEffect(() => {
+    const id = setTimeout(handleAvatarReady, AVATAR_WAIT_MS)
+    return () => clearTimeout(id)
+  }, [handleAvatarReady])
+  const handleSceneIn = useCallback(() => {
+    sceneIn.current = true
+    sendReady()
+  }, [sendReady])
 
   // A lost context (GPU reset, too many tabs, backgrounded on mobile) is recovered by
   // remounting the canvas, which builds a fresh context and re-uploads everything.
@@ -174,7 +222,7 @@ export function GameScene({ onReady }) {
         <Lighting />
         <World />
         <WorldLabels />
-        <BoardShop />
+        <DumbbellShop />
         <EggDisplays />
         <Portal />
         <Leaderboards />
@@ -185,18 +233,15 @@ export function GameScene({ onReady }) {
         <Pets />
         <RemotePlayers />
         <RemoteAvatars />
-        <Player />
+        <Player onAvatarReady={handleAvatarReady} />
+        <Boulders />
+        <Auras />
         <BlobShadows />
         <GainFX />
-        {warmedUp && firstFrame && (
-          <Suspense fallback={null}>
-            <Slide />
-          </Suspense>
-        )}
 
         <FollowCamera />
-        <ShaderWarmup onDone={handleWarmedUp} />
-        {warmedUp && <FirstFrameSignal onFirstFrame={handleFirstFrame} />}
+        <LiftInput />
+        <StartUp onSceneIn={handleSceneIn} />
         <PerfProbe />
         {showDevPerf && DevPerf && (
           <ErrorBoundary>

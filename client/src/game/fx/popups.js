@@ -1,15 +1,15 @@
 import { Vector3 } from 'three'
 
 /**
- * Floating "+12 POWER" text: a fixed pool of DOM elements (max 10 alive), positioned
+ * Floating "+12" Muscle text: a fixed pool of DOM elements (max 14 alive), positioned
  * by projecting a world point each frame. When the pool is full the oldest popup is
- * recycled, so a fast treadmill can never pile up elements.
+ * recycled, so fast clicking can never pile up elements.
  *
- * While you slide they're pinned to the screen instead (see spawnScattered), scattered
- * about it rather than chasing the rider round.
+ * Clicks, and everything while you push, are pinned to the screen instead (see
+ * spawnScattered), scattered about it rather than chasing you round.
  */
 
-export const POPUP_POOL_SIZE = 10
+export const POPUP_POOL_SIZE = 14
 const LIFE_MS = 1150
 const RISE = 1.4
 const DEFAULT_GRADIENT = 'linear-gradient(180deg, #fffaa8 0%, #ffd52a 45%, #ff9c00 100%)'
@@ -54,7 +54,7 @@ export function registerPopupElements(elements) {
  * @param {{ iconUrl?: string, scale?: number, gradient?: string, life?: number,
  *   follow?: Vector3, screen?: boolean, u?: number, v?: number, rot?: number }} [style]
  *   no `iconUrl` = text only; `follow` keeps the popup where it started relative to that
- *   (moving) point, e.g. a rider going down the hill. `screen` pins it to the screen at
+ *   (moving) point, e.g. someone pushing up the mountain. `screen` pins it to the screen at
  *   `u`/`v` instead (`position` is then ignored); `rot` tilts it as it lands.
  */
 export function spawnPopup(text, position, style = {}) {
@@ -93,19 +93,19 @@ export function spawnPopup(text, position, style = {}) {
   slot.el.style.display = 'flex'
 }
 
-// --- Scattered over the screen while you slide -------------------------------------------
+// --- Scattered over the screen: clicks, and while you push -----------------------------
 
 /**
  * The scatter area (reference px, the 1920x1080 layout): this far either side of the
  * middle, from this far down from the top to this far up from the bottom - below the
- * distance counter, above the Slide bar.
+ * level bar and its packs, above the bottom of the screen.
  */
 const SCATTER_HALF_WIDTH = 620
 const SCATTER_TOP = 350
-const SCATTER_BOTTOM = 340
+const SCATTER_BOTTOM = 220
 /** Kept at least this far in from the sides on narrow screens (reference px). */
 const SCATTER_EDGE = 130
-/** The rider, in scatter coordinates: the middle (|u| below this), from this far down. */
+/** Your character, in scatter coordinates: the middle (|u| below this), from this far down. */
 const RIDER_U = 0.28
 const RIDER_V = 0.3
 /** How far a popup floats up over its life (reference px). */
@@ -120,8 +120,8 @@ let scatterIndex = 0
 const scatterStyle = { iconUrl: null, scale: 1, gradient: null, life: 0, screen: true, u: 0, v: 0, rot: 0 }
 
 /**
- * A popup somewhere on screen, wherever the rider goes, at the next spot of a sequence
- * that spreads them evenly over the scatter area (skipping the rider): it lands with a
+ * A popup somewhere on screen, wherever you go, at the next spot of a sequence that
+ * spreads them evenly over the scatter area (skipping your character): it lands with a
  * bounce, floats up a little and fades.
  *
  * @param {string} text
