@@ -18,6 +18,7 @@ import RemotePlayers from './remote/RemotePlayers'
 import Particles from './fx/Particles'
 import LiftInput from './LiftInput'
 import Boulders from './push/Boulders'
+import ChatBubbles from './ChatBubbles'
 import DumbbellShop from './world/DumbbellShop'
 import EggDisplays from './world/EggDisplays'
 import Leaderboards from './world/Leaderboards'
@@ -87,6 +88,16 @@ function FirstFrameSignal({ onFirstFrame, onFirstFrameNow }) {
     onFirstFrameNow?.()
     setTimeout(onFirstFrame, 0)
   })
+  return null
+}
+
+/** Boxity's ad breaks: the scene stops drawing (and moving) until the ad is over. */
+function PauseForAds() {
+  const paused = useGame((s) => s.paused)
+  const setFrameloop = useThree((s) => s.setFrameloop)
+  useEffect(() => {
+    setFrameloop(paused ? 'never' : 'always')
+  }, [paused, setFrameloop])
   return null
 }
 
@@ -234,6 +245,8 @@ export function GameScene({ onReady }) {
         <RemotePlayers />
         <RemoteAvatars />
         <Player onAvatarReady={handleAvatarReady} />
+        <ChatBubbles />
+        <PauseForAds />
         <Boulders />
         <Auras />
         <BlobShadows />

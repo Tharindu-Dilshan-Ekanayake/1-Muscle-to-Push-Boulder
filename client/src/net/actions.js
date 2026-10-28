@@ -28,6 +28,10 @@ export const actions = {
   endPush: (reason) => send('endPush', { reason }),
   /** The boulder rolled into Wins orb `index`. */
   collectOrb: (index) => send('collectOrb', { index }),
+  /** A Boxity emote started ('' when it stops), so the room sees it. */
+  emote: (id) => send('emote', { id }),
+  /** Back to the spawn point (Boxity's "Reset Character"). */
+  respawn: () => send('respawn'),
   rebirth: () => send('rebirth'),
   skipRebirth: () => send('skipRebirth'),
   buyDumbbell: (id) => send('buyDumbbell', { id }),

@@ -13,9 +13,28 @@
 
     <!-- The avatar base body, fetched from the very start: the game opens with your
          avatar, so it mustn't wait for the scripts to ask for it (PlayerAvatar fetches
-         it with the same request). And the avatar CDN's connection, for the clothes. -->
-    <link rel="preload" href="https://static.bloxity.io/avatars/player.glb" as="fetch" crossorigin="anonymous" fetchpriority="high" />
-    <link rel="preconnect" href="https://static.bloxity.io" crossorigin />
+         it with the same request). And the avatar CDN's connection, for the clothes.
+         The CDN is the one Boxity told this page (window.BLOXITY_ENV), else production -
+         the same rule as src/bloxity/env.js. -->
+    <script>
+      ;(function () {
+        var env = window.BLOXITY_ENV
+        var cdn = (env && env.apiUrl && env.staticUrl) || 'https://static.bloxity.io'
+        var head = document.head
+        var preconnect = document.createElement('link')
+        preconnect.rel = 'preconnect'
+        preconnect.href = cdn
+        preconnect.crossOrigin = 'anonymous'
+        head.appendChild(preconnect)
+        var body = document.createElement('link')
+        body.rel = 'preload'
+        body.as = 'fetch'
+        body.href = cdn + '/avatars/player.glb'
+        body.crossOrigin = 'anonymous'
+        body.setAttribute('fetchpriority', 'high')
+        head.appendChild(body)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

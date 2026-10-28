@@ -11,12 +11,17 @@ export const NOT_PUSHING = -1000
 export const PlayerState = schema(
   {
     name: t.string(),
+    /** Their Boxity account id, as Boxity verified it ('' for our own guests): what chat bubbles are matched by. */
+    uid: t.string(),
     x: t.float32(),
     y: t.float32(),
     z: t.float32(),
     rotY: t.float32(),
-    /** 'idle' | 'walk' | 'train' (in a Train Zone) | 'jump' | 'push' */
+    /** 'idle' | 'walk' | 'train' (in a Train Zone) | 'jump' | 'push' | 'dance' */
     anim: t.string(),
+    /** The Boxity emote they're playing ('' = none), and when it started (ms since its own epoch, for its phase). */
+    emote: t.string(),
+    emoteAt: t.float64(),
     /** What their Bloxity avatar wears, as JSON `{ equipped, proportions }` ('' = base). */
     look: t.string(),
     dumbbellId: t.string(),

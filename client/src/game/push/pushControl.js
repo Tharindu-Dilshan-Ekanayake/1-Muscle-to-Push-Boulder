@@ -3,9 +3,10 @@ import { Vector3 } from 'three'
 import { GRAB_REACH, PUSH_SPEED, PUSH_START, ROLLBACK_SPEED, WIN_PAD } from '@shared/balance'
 import { formatNumber } from '@shared/format'
 import { onWinPad, winsMultiplier } from '@shared/logic'
-import { PUSH_RETURN, PUSH_ZONE, TRACK_HALF_WIDTH } from '@shared/world'
+import { PUSH_RETURN, PUSH_ZONE, SPAWN, TRACK_HALF_WIDTH } from '@shared/world'
 
 import { sfx } from '../../audio/sfx'
+import { closeDeathScreen, openDeathScreen } from '../../bloxity/deathScreen'
 import { actions } from '../../net/actions'
 import { getGame } from '../../store/game'
 import { fadeThrough } from '../../ui/fade'
@@ -24,8 +25,7 @@ const KEEPALIVE_MS = 5000
 const STEER_SPEED = 5.5
 /** Let go of the boulder this long and it starts rolling back. */
 const LET_GO = 0.35
-/** How long the crush plays before you're back down, and the top's celebration. */
-const CRUSH_HOLD_MS = 1900
+/** How long THE TOP's celebration plays before you're back down. */
 const TOP_HOLD_MS = 3800
 /** On a WINS pad: how long to celebrate (the Wins flying home) before it's back to the lobby. */
 const WIN_HOLD_MS = 700
@@ -415,9 +415,37 @@ function crushed(now) {
   push.endedAt = now
   push.strain = 1
   sfx.crush()
-  showBanner({ kind: 'crushed', stage: push.stage, need: STAGES[push.stage].need })
   burst({ x: push.position.x, y: push.position.y + 0.6, z: push.position.z, count: 30, palette: 'confetti', speed: 6 })
-  holdTimer = setTimeout(() => endPush('crushed'), CRUSH_HOLD_MS)
+  // The climb's over: the authority hears now (everyone sees you gone from the boulder),
+  // but you lie crushed until you respawn - from Boxity's death screen, back to the lobby.
+  push.ending = true
+  report()
+  actions.endPush('crushed')
+  const stage = push.stage
+  holdTimer = setTimeout(() => {
+    sfx.rollStop()
+    openDeathScreen({ stage, need: STAGES[stage]?.need ?? 0 }, () => fadeThrough(() => finishPush()))
+  }, CRUSH_ROLL_MS + 250)
+}
+
+/**
+ * Boxity's "Reset Character": straight back, no countdown. Crushed, or up the mountain,
+ * that's the lobby; in the lobby, the spawn point.
+ */
+export function resetCharacter() {
+  if (getGame().death) {
+    closeDeathScreen()
+    fadeThrough(() => finishPush())
+    return
+  }
+  if (push.active) {
+    if (push.ending) return
+    endPush('left')
+    return
+  }
+  actions.respawn()
+  runtime.player.position.set(SPAWN.x, 0, SPAWN.z)
+  runtime.player.yaw = Math.PI
 }
 
 /**

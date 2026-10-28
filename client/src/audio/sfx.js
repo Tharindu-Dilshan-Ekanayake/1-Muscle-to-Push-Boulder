@@ -18,6 +18,13 @@ let echo = null
 let noiseBuffer = null
 let music = null
 let muted = readMuted()
+/** Boxity's volume settings, 0-1: everything, and the music on its own. */
+let allVolume = 1
+let musicVolume = 1
+/** True while Boxity shows an ad break: silent until it's over. */
+let adBreak = false
+/** Where the master gain sits now. */
+const masterLevel = () => (muted || adBreak ? 0 : 0.5 * allVolume)
 const lastPlayed = new Map()
 const muteListeners = new Set()
 
@@ -38,7 +45,7 @@ function unlock() {
   if (!Ctor) return
   ctx = new Ctor()
   master = ctx.createGain()
-  master.gain.value = muted ? 0 : 0.5
+  master.gain.value = masterLevel()
   master.connect(ctx.destination)
   echo = createEcho()
   // One second of white noise, reused by every whoosh and crack.
@@ -46,6 +53,7 @@ function unlock() {
   const data = noiseBuffer.getChannelData(0)
   for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1
   music = createMusic(ctx, master, noiseBuffer)
+  music.setVolume(musicVolume)
   music.start()
 }
 
@@ -94,8 +102,24 @@ export function setMuted(value) {
   } catch {
     // Not persisted; fine.
   }
-  if (master) master.gain.value = muted ? 0 : 0.5
+  if (master) master.gain.value = masterLevel()
   for (const listener of muteListeners) listener(muted)
+}
+
+const clamp01 = (v) => Math.min(1, Math.max(0, Number.isFinite(v) ? v : 1))
+
+/** Boxity's volume settings (0-1): `all` for everything, `music` for the music alone. */
+export function setVolumes({ all = allVolume, music: musicLevel = musicVolume } = {}) {
+  allVolume = clamp01(all)
+  musicVolume = clamp01(musicLevel)
+  if (master) master.gain.value = masterLevel()
+  music?.setVolume(musicVolume)
+}
+
+/** Boxity's ad breaks: every sound off for the break, back as it was after. */
+export function setAdBreak(on) {
+  adBreak = Boolean(on)
+  if (master) master.gain.value = masterLevel()
 }
 
 /** Calls `listener(muted)` on every change; returns the unsubscribe. */

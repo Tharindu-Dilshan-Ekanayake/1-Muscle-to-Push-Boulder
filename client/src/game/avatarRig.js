@@ -2,6 +2,7 @@ import {
   Box3,
   BufferAttribute,
   BufferGeometry,
+  Euler,
   Matrix4,
   MeshLambertMaterial,
   NearestFilter,
@@ -13,6 +14,7 @@ import {
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 import { BACK_BONE, HAT_BONE, NECK_OFFSET_BONE, PART_SLOTS } from '../bloxity/avatarAssets'
+import { restInverses } from './avatarItems'
 import { BODY_OFFSETS, buildMusclePart, MUSCLE_SLOTS } from './muscleBody'
 import { computePose, POSED_BONES } from './playerPose'
 
@@ -68,6 +70,11 @@ export function collectRig(root) {
     handBone: null,
     handPoint: null,
     handRestInv: null,
+    /** bone name -> bone, and -> its rest transform in model space, inverted (see avatarItems). */
+    boneByName: {},
+    restInverse: restInverses(root),
+    /** Hand and shoe items, placed on their bones every frame (avatarItems.updateFollowers). */
+    followers: [],
   }
 
   const meshBySlot = new Map(
@@ -97,6 +104,7 @@ export function collectRig(root) {
     for (const bone of skeleton.bones) {
       // Proportions are re-applied every frame from these rest values.
       bone.matrixAutoUpdate = true
+      rig.boneByName[bone.name] = bone
       rig.bones[bone.name] = {
         bone,
         origPos: bone.position.clone(),
@@ -142,6 +150,12 @@ export function collectRig(root) {
       rig.handBone = handBone
       rig.handPoint = handBone.worldToLocal(palm)
       rig.handRestInv = rootQuatInv.clone().multiply(handBone.getWorldQuaternion(new Quaternion())).invert()
+    } else if (rig.boneByName.ArmR2_leaf) {
+      // A custom character (no player.glb arm to measure): held things go on its wrist.
+      const wrist = rig.boneByName.ArmR2_leaf
+      rig.handBone = wrist
+      rig.handPoint = new Vector3()
+      rig.handRestInv = rootQuatInv.clone().multiply(wrist.getWorldQuaternion(new Quaternion())).invert()
     }
 
     rig.hatBone = skeleton.bones.find((b) => b.name === HAT_BONE) || null
@@ -371,25 +385,6 @@ export function disposeMergedBody(body) {
 }
 
 /**
- * Attaches a hat or back accessory to its bone.
- * Offsets are the SDK's own: hats sit at y=0.8 on `Neck1`, back items at the origin
- * of `Spine2`.
- */
-export function attachAccessory(rig, kind, object) {
-  const bone = kind === 'hat' ? rig.hatBone : rig.backBone
-  if (!object || !bone) return null
-
-  object.scale.setScalar(1)
-  object.position.set(0, kind === 'hat' ? 0.8 : 0, 0)
-  object.traverse((child) => {
-    if (child.isMesh) child.castShadow = true
-  })
-
-  bone.add(object)
-  return object
-}
-
-/**
  * Applies Bloxity body proportions.
  *
  * Must run every frame: each bone is reset to its rest transform before the
@@ -470,6 +465,18 @@ export function applyProportions(rig, proportions, bulk = 0.5) {
   }
 }
 
+/**
+ * Puts every bone back in its rest pose - what applyProportions does first, without
+ * the proportions or the body's build: for a custom character, which wears neither.
+ */
+export function resetPose(rig) {
+  for (const { bone, origPos, origQuat, origScale } of Object.values(rig.bones)) {
+    bone.position.copy(origPos)
+    bone.quaternion.copy(origQuat)
+    bone.scale.copy(origScale)
+  }
+}
+
 /* ---------------------------------------------------------------------------
  * Procedural animation
  *
@@ -507,6 +514,57 @@ export function animateRig(rig, motion, unitsPerMetre = 1) {
     rotateBone(rig, name, 'axisY', joint.twist)
   }
   rig.root.position.y = rig.rootRestY + pose.lift * unitsPerMetre
+}
+
+// --- Boxity emotes --------------------------------------------------------------------
+
+const DEG = Math.PI / 180
+const _emoteQ = new Quaternion()
+const _emoteDelta = new Quaternion()
+const _emoteEuler = new Euler()
+const _sample = [0, 0, 0]
+
+/**
+ * A track's angles at `t` into `out`: smoothstep between keys, held outside them.
+ * Returns false for an empty track.
+ */
+function sampleTrack(keys, t, out) {
+  if (!keys?.length) return false
+  let a = keys[0]
+  let b = a
+  if (t <= keys[0][0]) b = a
+  else if (t >= keys[keys.length - 1][0]) a = b = keys[keys.length - 1]
+  else {
+    for (let i = 0; i < keys.length - 1; i += 1) {
+      if (t >= keys[i][0] && t <= keys[i + 1][0]) {
+        a = keys[i]
+        b = keys[i + 1]
+        break
+      }
+    }
+  }
+  let s = b[0] > a[0] ? (t - a[0]) / (b[0] - a[0]) : 0
+  s = s * s * (3 - 2 * s)
+  for (let j = 0; j < 3; j += 1) out[j] = a[j + 1] + (b[j + 1] - a[j + 1]) * s
+  return true
+}
+
+/**
+ * Plays Boxity emote `clip` (`{ len, loop, tracks }`, tracks as `[[name, keys]]`) on
+ * the rig at `time` seconds in, blended over the pose by `weight` (0-1). Each key is a
+ * delta in degrees over the bone's bind pose (euler XYZ, multiplied on the right); a
+ * bone the rig doesn't have is skipped. Run after animateRig.
+ */
+export function applyEmote(rig, clip, time, weight) {
+  if (!clip || !(weight > 0) || !rig?.skeleton) return
+  const t = clip.loop && clip.len > 0 ? time % clip.len : Math.min(time, clip.len || time)
+  for (const [name, keys] of clip.trackList) {
+    const rest = rig.bones[name]
+    if (!rest || !sampleTrack(keys, t, _sample)) continue
+    _emoteDelta.setFromEuler(_emoteEuler.set(_sample[0] * DEG, _sample[1] * DEG, _sample[2] * DEG, 'XYZ'))
+    _emoteQ.copy(rest.origQuat).multiply(_emoteDelta)
+    rest.bone.quaternion.slerp(_emoteQ, Math.min(1, weight))
+  }
 }
 
 const _parentInv = new Matrix4()

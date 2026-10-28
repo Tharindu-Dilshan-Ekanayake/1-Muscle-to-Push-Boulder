@@ -1,5 +1,6 @@
 import { isMaxLevel } from '@shared/logic'
 
+import { useClearTop } from '../../bloxity/reserved'
 import { useGame } from '../../store/game'
 import Icon from '../Icon'
 import StrokeText from '../StrokeText'
@@ -13,10 +14,12 @@ import { GRADIENTS, u } from './style'
 export function RebirthNotice() {
   const maxed = useGame((s) => isMaxLevel(s.profile))
   const togglePanel = useGame((s) => s.togglePanel)
+  // Below Boxity's toolbar, where it spans the top (a phone).
+  const clear = useClearTop(0.3, 0.7)
   if (!maxed) return null
   return (
     // Centred by the wrapper, so the button's own press and pulse can move it freely.
-    <div className="absolute left-1/2 -translate-x-1/2" style={{ top: u(22) }}>
+    <div className="absolute left-1/2 -translate-x-1/2" style={{ top: `calc(${u(22)} + ${clear}px)` }}>
       <button
         type="button"
         onClick={() => togglePanel('rebirth')}

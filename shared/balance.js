@@ -370,6 +370,18 @@ export const TUTORIAL = [
   { text: 'Buy the Iron Dumbbell with your Wins!', event: 'buyDumbbell', target: 'dumbbells' },
 ]
 
+/**
+ * The game's Boxity leaderboards, shown on its Boxity page and behind the trophy button
+ * in the game. Ids and settings are permanent once Boxity has seen them (later changes
+ * are made in the Boxity dashboard). The client declares them; the server reports the
+ * scores, from its own state.
+ */
+export const BOXITY_BOARDS = [
+  { id: 'muscle', label: 'Strongest', order: 'desc', mode: 'best', format: 'compact', reset: 'none' },
+  { id: 'rebirths', label: 'Most Rebirths', order: 'desc', mode: 'best', format: 'number', reset: 'weekly' },
+  { id: 'wins', label: 'Most Wins', order: 'desc', mode: 'sum', format: 'compact', reset: 'weekly' },
+]
+
 export const BADGES = {
   firstPush: { name: 'First Push' },
   firstRebirth: { name: 'First Rebirth' },

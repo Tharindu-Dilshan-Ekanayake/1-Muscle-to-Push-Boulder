@@ -1,6 +1,8 @@
 import { MAX_EQUIPPED_PETS } from '@shared/balance'
 import { dailyStatus, isMaxLevel } from '@shared/logic'
 
+import { useClearTop } from '../../bloxity/reserved'
+import { useBloxityStore } from '../../bloxity/store'
 import { useGame } from '../../store/game'
 import useNow from '../useNow'
 import Icon from '../Icon'
@@ -41,18 +43,24 @@ export function LeftMenu() {
   const profile = useGame((s) => s.profile)
   const now = useNow(10000)
   const giftAlert = dailyStatus(profile, now).some((d) => d.state === 'ready')
+  // Inside Boxity its menu has the settings, and its toolbar and chat take the top-left.
+  const embedded = useBloxityStore((s) => s.embedded)
+  const clear = useClearTop(0, 0.3)
 
   return (
     // As in the reference on a full-size screen; higher up on short ones (landscape
     // phones), so it stays clear of the Wins and Muscle in the corner below.
-    <div className="pointer-events-none absolute flex flex-col" style={{ left: u(18), top: `max(${u(150)}, min(${u(340)}, calc(100vh - ${u(760)})))`, gap: u(12) }}>
+    <div
+      className="pointer-events-none absolute flex flex-col"
+      style={{ left: u(18), top: `max(${u(150)}, min(${u(340)}, calc(100vh - ${u(760)})), ${clear + 8}px)`, gap: u(12) }}
+    >
       <div className="grid grid-cols-2" style={{ gap: u(8) }}>
         <MenuTile icon="pets" label="Pets" alert={petAlert} onClick={() => togglePanel('pets')} />
         <MenuTile icon="store" label="Store" top="SALE!" red onClick={() => togglePanel('store')} />
         <MenuTile icon="gift" label="Gifts" alert={giftAlert} onClick={() => togglePanel('daily')} />
         <MenuTile icon="rebirth" label="Rebirth" alert={canRebirth} red onClick={() => togglePanel('rebirth')} />
         <MenuTile icon="items" label="Items" alert={itemAlert} onClick={() => togglePanel('items')} />
-        <MenuTile icon="gear" label="Settings" onClick={() => togglePanel('settings')} />
+        {!embedded && <MenuTile icon="gear" label="Settings" onClick={() => togglePanel('settings')} />}
       </div>
     </div>
   )

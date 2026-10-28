@@ -1,4 +1,6 @@
-import { waitForSDK } from '../bloxity/sdk'
+import { boxityEnv } from '../bloxity/env'
+import { reportPlayer, reportRoom } from '../bloxity/platform'
+import { getSDK, safeCall, waitForSDK } from '../bloxity/sdk'
 import { runtime } from '../game/runtime'
 import { getGame } from '../store/game'
 import { setTransport } from './actions'
@@ -17,6 +19,27 @@ const MATCHMAKER_GIVE_UP_MS = 60_000
 const MATCHMAKER_BACKOFF_MS = [1000, 2000, 4000, 8000, 10000]
 
 const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '')
+
+/**
+ * A room to join straight away, from the page's ?roomId= - Boxity's "Join" under Open
+ * Rooms, or a friend's invite: `relay~colyseus` (as we report rooms) or a bare Colyseus
+ * room id (as the room directory lists them). Used once, by the first connection.
+ */
+let deepLink = parseRoomId(params.get('roomId'))
+/** The room we're in now: `{ relayRoomId, colyseusRoomId }`, to rejoin after signing in mid-game. */
+let currentRoom = null
+
+function parseRoomId(value) {
+  if (!value) return null
+  const [first, second] = String(value).split('~')
+  return second ? { relayRoomId: first, colyseusRoomId: second } : { relayRoomId: null, colyseusRoomId: first }
+}
+
+/** What a join sends: who you are, and your Boxity token (read fresh, never kept) for the server to check. */
+function joinOptions(identity) {
+  const token = safeCall(() => getSDK()?.auth?.getToken?.()) || undefined
+  return { playerId: identity.id, name: identity.name, token }
+}
 
 /**
  * Where to play. `?offline` forces offline play, and in development `?server=` points
@@ -82,6 +105,8 @@ async function healthOf(url) {
 function startLocal(identity, message) {
   const local = createLocalServer({ ...identity, onEvent: handleServerEvent })
   active = { kind: 'local', close: () => local.close() }
+  currentRoom = null
+  reportRoom('')
   setTransport(local)
   getGame().setNet({ mode: 'offline', players: 1, lobbyId: null, code: null, isPrivate: false, message })
 }
@@ -92,9 +117,21 @@ function join(client, options, lobby) {
   return client.joinOrCreate('game', options)
 }
 
-/** Wires a joined room into the game: events, other players, position reports. */
-function attachRoom(room, identity, Callbacks) {
+/**
+ * Wires a joined room into the game: events, other players, position reports. Through
+ * Boxity's matchmaker, `relayRoomId` is the relay pinning its pod; with it, the room is
+ * reported to Boxity as `relay~colyseus`, which is what invites and rejoins need.
+ */
+function attachRoom(room, identity, Callbacks, relayRoomId = null) {
   const callbacks = Callbacks.get(room)
+  currentRoom = { relayRoomId, colyseusRoomId: room.roomId }
+  reportRoom(relayRoomId ? `${relayRoomId}~${room.roomId}` : room.roomId)
+  // Players already here (the first state) as against ones who join after us, for
+  // Boxity's "your friend joined" toasts.
+  let settled = false
+  room.onStateChange.once(() => {
+    settled = true
+  })
   let leaving = false
   /** Set when the same account joined from another window and took over. */
   let replaced = false
@@ -147,6 +184,7 @@ function attachRoom(room, identity, Callbacks) {
     if (sessionId !== room.sessionId) {
       upsertRemotePlayer(sessionId, player)
       callbacks.onChange(player, () => upsertRemotePlayer(sessionId, player))
+      reportPlayer(player.name, !settled)
     }
     syncLobby()
   })
@@ -219,6 +257,8 @@ function attachRoom(room, identity, Callbacks) {
 export async function startConnection(identity, lobby = { mode: 'public' }) {
   const gen = ++generation
   lastIdentity = identity
+  // Signing in mid-game rejoins the room you're in, not a new one (friends stay together).
+  const rejoin = lobby.mode === 'rejoin' ? currentRoom : null
   stopConnection()
   const target = serverTarget()
   if (!target) {
@@ -228,7 +268,9 @@ export async function startConnection(identity, lobby = { mode: 'public' }) {
 
   getGame().setNet({ mode: 'connecting', message: 'Connecting…' })
   if (target.kind === 'matchmaker') {
-    await joinThroughMatchmaker(gen, identity, target.gameId)
+    const room = rejoin ?? deepLink
+    deepLink = null
+    await joinThroughMatchmaker(gen, identity, target.gameId, room)
     return
   }
   const url = target.kind === 'dev' ? await findDevServer() : (await healthOf(target.url)) && target.url
@@ -243,7 +285,7 @@ export async function startConnection(identity, lobby = { mode: 'public' }) {
   const { Client, Callbacks } = await import('@colyseus/sdk')
   if (gen !== generation) return
   const client = new Client(url)
-  const options = { playerId: identity.id, name: identity.name }
+  const options = joinOptions(identity)
   for (let attempt = 0; attempt <= JOIN_RETRIES; attempt += 1) {
     try {
       // After a failed private/join attempt, fall back to a public lobby.
@@ -271,8 +313,8 @@ export async function startConnection(identity, lobby = { mode: 'public' }) {
  * Client - each endpoint is pinned to one pod. Retries with backoff for up to a
  * minute, then plays offline.
  */
-async function joinThroughMatchmaker(gen, identity, gameId) {
-  const options = { playerId: identity.id, name: identity.name }
+async function joinThroughMatchmaker(gen, identity, gameId, room = null) {
+  const options = joinOptions(identity)
   const started = performance.now()
   const [{ Client, Callbacks }, sdk] = await Promise.all([import('@colyseus/sdk'), waitForSDK().catch(() => null)])
   if (gen !== generation) return
@@ -280,16 +322,32 @@ async function joinThroughMatchmaker(gen, identity, gameId) {
     startLocal(identity, 'Server unreachable - playing offline')
     return
   }
-  for (let attempt = 0; ; attempt += 1) {
+  // A particular room first (an invite, Open Rooms' Join, a rejoin after signing in),
+  // then normal matchmaking if it's gone or full.
+  if (room) {
     try {
-      const { endpoint } = await sdk.net.resolveEndpoint(gameId)
-      if (gen !== generation) return
-      const room = await new Client(endpoint).joinOrCreate('game', options)
+      const joined = await joinRoomById(Client, gameId, room, options)
       if (gen !== generation) {
-        room.leave(true)
+        joined.room.leave(true)
         return
       }
-      attachRoom(room, identity, Callbacks)
+      attachRoom(joined.room, identity, Callbacks, joined.relayRoomId)
+      return
+    } catch (err) {
+      if (gen !== generation) return
+      console.warn('[net] that room is gone or full; matchmaking instead', err)
+    }
+  }
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const { endpoint, roomId: relayRoomId } = await sdk.net.resolveEndpoint(gameId)
+      if (gen !== generation) return
+      const joined = await new Client(endpoint).joinOrCreate('game', options)
+      if (gen !== generation) {
+        joined.leave(true)
+        return
+      }
+      attachRoom(joined, identity, Callbacks, relayRoomId)
       return
     } catch (err) {
       if (gen !== generation) return
@@ -301,6 +359,30 @@ async function joinThroughMatchmaker(gen, identity, gameId) {
     }
   }
   startLocal(identity, 'Could not reach the game server - playing offline')
+}
+
+/**
+ * Joins room `room` (`{ relayRoomId, colyseusRoomId }`) by id, through the relay that
+ * pins its pod - a bare joinById through any relay would land on whichever pod the
+ * matchmaker picked. Without the relay, Boxity's room directory says where it is.
+ */
+async function joinRoomById(Client, gameId, room, options) {
+  const ws = (url) => String(url).replace(/^http/i, 'ws')
+  const { playUrl } = boxityEnv()
+  let relayRoomId = room.relayRoomId
+  let url = relayRoomId ? `${ws(playUrl)}/v1/ws/${relayRoomId}` : null
+  if (!url) {
+    const res = await fetch(`${playUrl}/v1/dir/${encodeURIComponent(gameId)}/list`, { signal: AbortSignal.timeout(6000) })
+    const listed = (await res.json())?.rooms ?? []
+    const found = listed.find((r) => [r.colyseusRoomId, r.roomId, r.id].includes(room.colyseusRoomId))
+    if (!found) throw new Error('room not listed')
+    relayRoomId = found.relayRoomId ?? found.relayId ?? null
+    url = found.joinUrl ? ws(found.joinUrl) : relayRoomId ? `${ws(playUrl)}/v1/ws/${relayRoomId}` : null
+    if (!url) throw new Error('no way into that room')
+    relayRoomId ??= /\/v1\/ws\/([^/?#]+)/.exec(url)?.[1] ?? null
+  }
+  const joined = await new Client(url).joinById(room.colyseusRoomId, options)
+  return { room: joined, relayRoomId }
 }
 
 /** Takes the game back after another window of the same account replaced this one. */

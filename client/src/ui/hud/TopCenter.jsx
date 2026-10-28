@@ -1,6 +1,7 @@
 import { TUTORIAL } from '@shared/balance'
 import { formatNumber } from '@shared/format'
 
+import { useClearTop } from '../../bloxity/reserved'
 import { useGame } from '../../store/game'
 import StrokeText from '../StrokeText'
 import { u } from './style'
@@ -35,10 +36,11 @@ function useHint() {
 export function TopCenter() {
   const hint = useHint()
   const hidden = useGame((s) => s.pushing || s.panel !== null)
+  const clear = useClearTop(0.25, 0.75)
   if (!hint) return null
 
   return (
-    <div className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 flex-col items-center" style={{ top: u(196) }}>
+    <div className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 flex-col items-center" style={{ top: `max(${u(196)}, ${clear + 8}px)` }}>
       <div key={hint.key} className="pp-pet" style={{ fontSize: u(60), animationPlayState: hidden ? 'paused' : 'running' }}>
         <StrokeText stroke={u(12)} gradient={BANNER_GRADIENT}>
           {hint.text}

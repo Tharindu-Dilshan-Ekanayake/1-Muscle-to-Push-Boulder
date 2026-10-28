@@ -4,21 +4,24 @@ import { Bone, Box3, BufferAttribute, BufferGeometry, DataTexture, MeshLambertMa
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 
-import { BASE_BODY_URL } from '../bloxity/avatarAssets'
+import { baseBodyUrl, isRealId } from '../bloxity/avatarAssets'
 import { loadLook } from '../bloxity/avatarLoader'
 import { useBloxity } from '../bloxity/BloxityContext'
+import { getSDK } from '../bloxity/sdk'
 import { shareLook } from '../net/connection'
+import { attachAccessory, detachAccessory, restInverses, updateFollowers } from './avatarItems'
 import {
   animateRig,
+  applyEmote,
   applyPart,
   applyProportions,
   applySkin,
-  attachAccessory,
   collectRig,
   disposeMergedBody,
   mergeBody,
   placeHand,
   prepareMuscleParts,
+  resetPose,
 } from './avatarRig'
 
 /**
@@ -61,7 +64,11 @@ function fallbackMotion(delta) {
  */
 export const BloxityAvatar = forwardRef(function BloxityAvatar(props, ref) {
   const baseScene = useBaseBody()
-  return baseScene ? <DressedAvatar ref={ref} baseScene={baseScene} {...props} /> : null
+  // A custom character, if one is worn: undefined while it's looked up, null for none.
+  const character = useCustomCharacter(props.equipped)
+  if (!baseScene || character === undefined) return null
+  if (character) return <CharacterAvatar ref={ref} baseScene={baseScene} character={character} {...props} />
+  return <DressedAvatar ref={ref} baseScene={baseScene} {...props} />
 })
 
 /**
@@ -77,9 +84,10 @@ let baseBodyError = null
 // Its own texture is never used (every avatar gets its skin), so it isn't even decoded:
 // that kept the parse waiting for the start-up work to finish.
 const baseLoader = new GLTFLoader().register(() => ({ name: 'pp_skip_textures', loadTexture: () => Promise.resolve(null) }))
-const baseBodyLoad = fetch(BASE_BODY_URL, { priority: 'high' })
+const BASE_URL = baseBodyUrl()
+const baseBodyLoad = fetch(BASE_URL, { priority: 'high' })
   .then((res) => res.arrayBuffer())
-  .then((data) => baseLoader.parseAsync(data, BASE_BODY_URL.replace(/[^/]*$/, '')))
+  .then((data) => baseLoader.parseAsync(data, BASE_URL.replace(/[^/]*$/, '')))
   .then((gltf) => (baseBody = gltf.scene))
   .catch((err) => {
     baseBodyError = err
@@ -178,8 +186,7 @@ const DressedAvatar = forwardRef(function DressedAvatar(
                   }
                 })
               }
-              const added = attachAccessory(rig, result.accessory, result.object)
-              if (added) attached.push(added)
+              attached.push(...attachAccessory(rig, result.accessory, result.object))
             }
           } catch (err) {
             console.warn(`[bloxity] failed to apply ${result.kind}`, err)
@@ -204,7 +211,7 @@ const DressedAvatar = forwardRef(function DressedAvatar(
     return () => {
       cancelled = true
       for (const object of attached) {
-        object.parent?.remove(object)
+        detachAccessory(rig, object)
         object.traverse((child) => {
           child.geometry?.dispose()
           if (child.isMesh) child.material?.dispose()
@@ -246,7 +253,9 @@ const DressedAvatar = forwardRef(function DressedAvatar(
       const motion = motionRef?.current ?? fallbackMotion(delta)
       applyProportions(rig, proportionsRef.current, motion.bulk)
       animateRig(rig, motion, 1 / fit.scale)
+      applyEmote(rig, motion.emoteClip, motion.emoteTime, motion.emoteWeight)
       if (handRef?.current) placeHand(rig, handRef.current)
+      updateFollowers(rig)
     } catch {
       // A malformed payload must not kill the render loop.
     }
@@ -303,6 +312,157 @@ export function AvatarShaderWarmup() {
   )
   return <primitive object={mesh} />
 }
+
+// --- Custom characters ------------------------------------------------------------------
+
+/** A character's GLB, loaded once per URL (its texture is in it) and cloned per player. */
+const characterScenes = new Map()
+const characterLoader = new GLTFLoader()
+function loadCharacterScene(url) {
+  if (!characterScenes.has(url)) {
+    characterScenes.set(
+      url,
+      characterLoader.loadAsync(url).then(
+        (gltf) => gltf.scene,
+        () => null,
+      ),
+    )
+  }
+  return characterScenes.get(url)
+}
+
+/** How long a character may take to look up and load before the regular avatar shows. */
+const CHARACTER_WAIT_MS = 8000
+
+/**
+ * The custom character `equipped` wears (its `characterId`), as `{ info, scene }`: null
+ * when none is worn, it's been taken down, the feature is off or its GLB won't load (the
+ * regular avatar then shows - never nobody); undefined while that's being found out.
+ */
+function useCustomCharacter(equipped) {
+  const id = isRealId(equipped?.characterId) ? String(equipped.characterId) : null
+  const [found, setFound] = useState({ id: null, value: null })
+  useEffect(() => {
+    if (!id) return undefined
+    let live = true
+    const settle = (value) => live && setFound({ id, value })
+    const timer = setTimeout(() => settle(null), CHARACTER_WAIT_MS)
+    Promise.resolve(getSDK()?.avatar?.getCharacterFor?.(equipped))
+      .then(async (info) => {
+        const scene = info?.glbUrl ? await loadCharacterScene(info.glbUrl) : null
+        clearTimeout(timer)
+        settle(scene ? { info, scene } : null)
+      })
+      .catch(() => {
+        clearTimeout(timer)
+        settle(null)
+      })
+    return () => {
+      live = false
+      clearTimeout(timer)
+    }
+    // Re-resolved only when a different character is worn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+  if (!id) return null
+  return found.id === id ? found.value : undefined
+}
+
+/** player.glb's rest transforms, which hand and shoe items keep on a character too. */
+const baseRest = new WeakMap()
+const baseRestOf = (scene) => {
+  if (!baseRest.has(scene)) baseRest.set(scene, restInverses(cloneSkeleton(scene)))
+  return baseRest.get(scene)
+}
+
+/**
+ * A player wearing their own uploaded character: its GLB instead of player.glb - the
+ * same 22 bones, so every pose and emote plays on it - at player.glb's scale, with no
+ * skin, clothes, body parts, proportions or build. Their items are fitted to it with
+ * Boxity's characterAccessoryMatrix (head and torso) and its rig's anchors (hands and
+ * shoes).
+ */
+const CharacterAvatar = forwardRef(function CharacterAvatar(
+  { baseScene, character, equipped, onReady, targetHeight = 1.8, motionRef, handRef, ...props },
+  ref,
+) {
+  const model = useMemo(() => cloneSkeleton(character.scene), [character])
+  const rig = useMemo(() => collectRig(model), [model])
+  const [ready, setReady] = useState(false)
+
+  // player.glb's size sets the scale, so a short or tall character stays so.
+  const fit = useMemo(() => {
+    const size = new Box3().setFromObject(baseScene).getSize(new Vector3())
+    const scale = size.y > 0 ? targetHeight / size.y : 1
+    return { scale, footOffset: -new Box3().setFromObject(model).min.y * scale }
+  }, [baseScene, model, targetHeight])
+
+  useEffect(() => {
+    let cancelled = false
+    const attached = []
+    const sdk = getSDK()
+    const placement = {
+      character: character.info,
+      matrixFor: (bone) => sdk?.avatar?.characterAccessoryMatrix?.(character.info, bone) ?? null,
+      playerRestInverse: baseRestOf(baseScene),
+    }
+    loadLook(equipped)
+      .then((results) => {
+        if (cancelled) return
+        for (const result of results) {
+          if (result.kind !== 'accessory' || !result.object) continue
+          try {
+            if (result.texture) {
+              result.object.traverse((child) => {
+                if (child.isMesh) child.material = new MeshLambertMaterial({ map: result.texture })
+              })
+            }
+            attached.push(...attachAccessory(rig, result.accessory, result.object, placement))
+          } catch (err) {
+            console.warn('[bloxity] could not fit an item to a character', err)
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => !cancelled && setReady(true))
+    return () => {
+      cancelled = true
+      for (const object of attached) {
+        detachAccessory(rig, object)
+        object.traverse((child) => {
+          child.geometry?.dispose()
+          if (child.isMesh) child.material?.dispose()
+        })
+      }
+    }
+  }, [rig, equipped, character, baseScene])
+
+  useFrame((_state, delta) => {
+    if (!ready) return
+    try {
+      const motion = motionRef?.current ?? fallbackMotion(delta)
+      resetPose(rig)
+      animateRig(rig, motion, 1 / fit.scale)
+      applyEmote(rig, motion.emoteClip, motion.emoteTime, motion.emoteWeight)
+      if (handRef?.current) placeHand(rig, handRef.current)
+      updateFollowers(rig)
+    } catch {
+      // A malformed character must not kill the render loop.
+    }
+  })
+
+  useEffect(() => {
+    if (ready) onReady?.()
+  }, [ready, onReady])
+
+  return (
+    <group ref={ref} {...props}>
+      <group scale={fit.scale} position={[0, fit.footOffset, 0]} visible={ready}>
+        <primitive object={model} />
+      </group>
+    </group>
+  )
+})
 
 /**
  * Your own avatar: whatever your Bloxity account (or guest) is wearing. Also tells the

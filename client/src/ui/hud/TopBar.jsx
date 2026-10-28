@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 
 import { isMuted, onMutedChange, setMuted } from '../../audio/sfx'
+import { useClearTop } from '../../bloxity/reserved'
+import { useBloxityStore } from '../../bloxity/store'
 import { useGame } from '../../store/game'
 import AuthHUD from '../AuthHUD'
 import Icon from '../Icon'
@@ -29,11 +31,15 @@ function SoundButton() {
  */
 export function TopBar() {
   const openPanel = useGame((s) => s.openPanel)
+  // Inside Boxity its trophy button has the leaderboards; on a phone its toolbar spans
+  // the top, so this sits below it.
+  const embedded = useBloxityStore((s) => s.embedded)
+  const clear = useClearTop(0.55, 1)
 
   return (
-    <div className="pointer-events-none absolute flex items-center" style={{ right: u(16), top: u(14), gap: u(12) }}>
+    <div className="pointer-events-none absolute flex items-center" style={{ right: u(16), top: `calc(${u(14)} + ${clear}px)`, gap: u(12) }}>
       <SoundButton />
-      <RoundButton icon="star" label="Leaderboards" onClick={() => openPanel('leaderboards')} iconSize={34} />
+      {!embedded && <RoundButton icon="star" label="Leaderboards" onClick={() => openPanel('leaderboards')} iconSize={34} />}
       <AuthHUD />
     </div>
   )

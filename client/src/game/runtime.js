@@ -28,6 +28,8 @@ export const runtime = {
     frozen: false,
     /** performance.now() of the last lift, for the curl. */
     liftedAt: 0,
+    /** The Boxity emote playing: `{ id, at }` (at = performance.now() it started), or null. */
+    emote: null,
   },
 
   /** Touch input, written by the on-screen joystick. -1..1, +y = forward. */

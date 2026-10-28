@@ -7,6 +7,7 @@ import { walkSpeed } from '@shared/balance'
 import { remotePlayers } from '../../net/remotePlayers'
 import { createHeldDumbbell, disposeDumbbellMesh } from '../dumbbell'
 import { BloxityAvatar } from '../PlayerAvatar'
+import { emoteMotion } from '../emotes'
 import { bulkFor, growBody } from '../playerPose'
 import { stepRemotePushers } from '../push/remotePush'
 
@@ -70,6 +71,7 @@ function RemoteAvatar({ sessionId, look }) {
       const sinceLift = performance.now() - r.liftedAt
       m.curl = sinceLift < CURL_MS ? sinceLift / CURL_MS : 0
       m.stride += delta * (5 + 6 * Math.min(1, r.climbSpeed / MAX_SPEED))
+      m.emoteClip = null
       lastY.current = null
       return
     }
@@ -88,6 +90,7 @@ function RemoteAvatar({ sessionId, look }) {
       m.training = false
       m.curl = 0
       m.stride += delta * (4 + 5 * Math.min(1, Math.abs(r.pushSpeed) / 6.5))
+      m.emoteClip = null
       lastY.current = null
       return
     }
@@ -112,6 +115,8 @@ function RemoteAvatar({ sessionId, look }) {
     if (lastY.current !== null) m.vy += ((y - lastY.current) / Math.max(delta, 1e-3) - m.vy) * 0.3
     lastY.current = y
     m.stride += delta * (5 + 6 * Math.min(1, r.speed / MAX_SPEED))
+    // Their Boxity emote, while they stand still.
+    if (!r.emote || r.speed > 0.6 || !m.grounded || m.training || !emoteMotion(m, r.emote, r.emoteStart)) m.emoteClip = null
   })
 
   return (

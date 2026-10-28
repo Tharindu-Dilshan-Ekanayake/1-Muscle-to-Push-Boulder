@@ -25,6 +25,7 @@ import { createHeldDumbbell, disposeDumbbellMesh } from './dumbbell'
 import FallbackAvatar from './FallbackAvatar'
 import PlayerAvatar, { AvatarShaderWarmup } from './PlayerAvatar'
 import { bulkFor, growBody } from './playerPose'
+import { emoteMotion, stopEmote } from './emotes'
 import { advancePush, push, walkSafezone } from './push/pushControl'
 import { runtime } from './runtime'
 import useKeyboard from './useKeyboard'
@@ -220,6 +221,8 @@ export function Player({ onAvatarReady }) {
       motion.training = false
       motion.curl = 0
       motion.stride += delta * (4 + 5 * Math.min(1, Math.abs(push.speed) / 6.5))
+      if (player.emote) stopEmote()
+      motion.emoteClip = null
       return
     }
     if (wasPushing.current && group && visual) {
@@ -268,6 +271,8 @@ export function Player({ onAvatarReady }) {
       motion.sitting = true
       motion.training = true
       motion.curl = 0
+      if (player.emote) stopEmote()
+      motion.emoteClip = null
       return
     }
     player.bench = -1
@@ -415,6 +420,11 @@ export function Player({ onAvatarReady }) {
     motion.curl = sinceLift < CURL_MS ? sinceLift / CURL_MS : 0
     // Steps quicken with speed: the stride phase runs faster rather than jumping.
     motion.stride += delta * (5 + 6 * Math.min(1, speed / maxSpeed))
+
+    // A Boxity emote plays while you stand; moving, jumping, dancing or climbing stops it.
+    const emote = player.emote
+    if (emote && (free || moving || !player.grounded || dancing || !emoteMotion(motion, emote.id, emote.at))) stopEmote()
+    if (!player.emote) motion.emoteClip = null
   })
 
   return (

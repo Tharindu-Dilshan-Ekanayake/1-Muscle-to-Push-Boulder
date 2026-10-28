@@ -6,7 +6,9 @@ import { formatNumber } from '@shared/format'
 import { isSlope, STAGES, stageAt, TRACK_LENGTH } from '../../game/push/course'
 import { endPush, LOW_POWER, powerLeft, push } from '../../game/push/pushControl'
 import { STAGE_THEMES } from '../../game/push/themes'
+import { useBloxityStore } from '../../bloxity/store'
 import { useGame } from '../../store/game'
+import DeathCard from './DeathCard'
 import Icon from '../Icon'
 import StrokeText from '../StrokeText'
 import { ChunkyButton } from './parts'
@@ -190,12 +192,13 @@ function FreeHint() {
   )
 }
 
-/** Back to the plaza (Q or Escape on a keyboard). */
+/** Back to the plaza (Q on a keyboard, or Escape outside Boxity). */
 function LobbyButton() {
   useEffect(() => {
     const onKey = (e) => {
       if (e.repeat) return
-      if (e.code === 'KeyQ' || e.code === 'Escape') endPush('left')
+      // Escape opens Boxity's menu inside Boxity (see bloxity/platform).
+      if (e.code === 'KeyQ' || (e.code === 'Escape' && !useBloxityStore.getState().embedded)) endPush('left')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -223,6 +226,8 @@ function LobbyButton() {
 /** Up the mountain: your power, where you are, the warnings, the banners, and the way back. */
 export function PushHud() {
   const pushing = useGame((s) => s.pushing)
+  // Crushed: the death card's Respawn is the way back, not the Lobby button.
+  const dead = useGame((s) => s.death !== null)
   if (!pushing) return null
   return (
     <>
@@ -231,7 +236,8 @@ export function PushHud() {
       <LowPower />
       <FreeHint />
       <Banner />
-      <LobbyButton />
+      <DeathCard />
+      {!dead && <LobbyButton />}
     </>
   )
 }

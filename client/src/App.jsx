@@ -13,10 +13,12 @@ import PopupLayer from './ui/PopupLayer'
 import ReplacedOverlay from './ui/ReplacedOverlay'
 import ScreenFade from './ui/ScreenFade'
 import TouchControls from './ui/TouchControls'
+import { platformReady } from './bloxity/platform'
 
 function App() {
   const [ready, setReady] = useState(false)
   const handleReady = useCallback(() => {
+    platformReady()
     setReady(true)
     useGame.getState().setPlayable()
   }, [])

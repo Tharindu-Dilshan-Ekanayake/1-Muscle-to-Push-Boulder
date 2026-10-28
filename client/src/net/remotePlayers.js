@@ -62,7 +62,14 @@ export function upsertRemotePlayer(sessionId, state) {
     remotePlayers.set(sessionId, r)
   }
   r.name = state.name
+  /** Their Boxity account id ('' for a guest of ours): what chat bubbles find them by. */
+  r.uid = state.uid || ''
   r.anim = state.anim
+  // A Boxity emote: played from when we heard of it.
+  if ((state.emote || '') !== (r.emote || '')) {
+    r.emote = state.emote || ''
+    r.emoteStart = performance.now()
+  }
   r.dumbbellId = state.dumbbellId || 'wood'
   r.aura = state.aura || ''
   if (state.muscle > r.muscle) r.liftedAt = performance.now()
