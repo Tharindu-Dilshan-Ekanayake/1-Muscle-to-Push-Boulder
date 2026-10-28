@@ -78,6 +78,22 @@ async function openMongo(uri) {
       }
       return out
     },
+    async adopt(userId, guestIds) {
+      if (await profiles.findOne({ _id: userId }, { projection: { _id: 1 } })) return null
+      for (const guestId of guestIds) {
+        // Claimed once: a guest save marked carried can never go to a second account.
+        const guest = await profiles.findOneAndUpdate({ _id: guestId, carriedTo: { $exists: false } }, { $set: { carriedTo: userId } })
+        if (!guest) continue
+        try {
+          await profiles.insertOne({ _id: userId, owner: null, data: guest.data, ...leaderboardFields(JSON.parse(guest.data)) })
+          return guestId
+        } catch (err) {
+          if (err?.code === 11000) return null
+          throw err
+        }
+      }
+      return null
+    },
     async stock() {
       const doc = await kv.findOne({ _id: 'sphinxStock' })
       return doc ? doc.value : SPHINX_STOCK_DEFAULT
@@ -143,6 +159,20 @@ async function openSqlite(path) {
       }
       return out
     },
+    async adopt(userId, guestIds) {
+      if (db.prepare('SELECT 1 FROM profiles WHERE id = ?').get(userId)) return null
+      for (const guestId of guestIds) {
+        const row = db.prepare('SELECT data FROM profiles WHERE id = ?').get(guestId)
+        if (!row || db.prepare('SELECT 1 FROM kv WHERE key = ?').get(`carried:${guestId}`)) continue
+        db.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run(`carried:${guestId}`, userId)
+        const f = leaderboardFields(JSON.parse(row.data))
+        db.prepare(
+          `INSERT INTO profiles (id, name, data, rebirths, best_muscle, best_meter, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(userId, f.name ?? '', row.data, f.rebirths ?? 0, f.bestMuscle ?? 0, f.bestMeter ?? 0, f.updatedAt ?? Date.now())
+        return guestId
+      }
+      return null
+    },
     async stock() {
       return readStock()
     },
@@ -199,6 +229,21 @@ export async function saveProfile(profile, owner) {
   } catch (err) {
     console.error(`[db] save failed for ${profile.id}`, err)
     return false
+  }
+}
+
+/**
+ * A guest's progress, carried into the Boxity account `userId` they've just signed in
+ * to - but only when that account has no progress in this game yet, and only from the
+ * first of `guestIds` (the guests this browser played as) whose save hasn't been carried
+ * into an account before. Resolves the guest id carried from, or null.
+ */
+export async function adoptGuestProgress(userId, guestIds) {
+  try {
+    return await store.adopt(userId, guestIds.filter((id) => id && id !== userId))
+  } catch (err) {
+    console.error(`[db] could not carry guest progress into ${userId}`, err)
+    return null
   }
 }
 

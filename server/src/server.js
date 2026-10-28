@@ -3,9 +3,10 @@ import express from 'express'
 import { defineRoom, defineServer } from '@colyseus/core'
 import { WebSocketTransport } from '@colyseus/ws-transport'
 
+import { flushScores, hostedOrigins, installRoomReporter, installScoreReporter, verifyPlayerToken } from './boxity.js'
 import { closeStorage, openStorage } from './db.js'
 import { startLeaderboards } from './leaderboards.js'
-import { activePlayers } from './registry.js'
+import { activePlayers, liveRooms } from './registry.js'
 import { GameRoom } from './rooms/GameRoom.js'
 
 // Bloxity Legion injects PORT (HTTP and WebSocket share it); 2567 is Colyseus's usual.
@@ -13,13 +14,12 @@ const PORT = Number(process.env.PORT || 2567)
 
 /**
  * Browser origins allowed to call /api: Legion's CLIENT_ORIGIN (the game's site), the
- * Bloxity-hosted frontends, extra ones from CLIENT_ORIGINS, and Vite dev servers.
+ * game's Boxity-hosted pages in the environment we were told, extra ones from
+ * CLIENT_ORIGINS, and Vite dev servers.
  */
-const gameId = process.env.BLOXITY_GAME_ID
 const ALLOWED_ORIGINS = [
   process.env.CLIENT_ORIGIN,
-  gameId && `https://${gameId}.play.bloxity.io`,
-  gameId && `https://${gameId}.dev.play.bloxity.io`,
+  ...hostedOrigins(),
   ...(process.env.CLIENT_ORIGINS || '').split(',').map((s) => s.trim()),
   ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:5173', 'http://localhost:5180', 'http://127.0.0.1:5180']),
 ].filter(Boolean)
@@ -40,15 +40,14 @@ function routes(app) {
   })
 
   /**
-   * Auth passthrough for the Bloxity SDK: the frontend POSTs `{ token, user }` from
-   * `Legion.SDK.auth.authenticateWithServer('/api/legion-auth')`.
+   * For `Legion.SDK.auth.authenticateWithServer('/api/legion-auth')`: the frontend POSTs
+   * `{ token, user }`, and only what Boxity says about the token counts - never the
+   * `user` it sent along.
    */
-  app.post('/api/legion-auth', (req, res) => {
-    // TODO: verify the Bloxity JWT here before trusting req.body.user. Until then
-    // `req.body.user` is attacker-controlled - anyone can POST any legionId. Verify
-    // `req.body.token` against Bloxity's public key / introspection endpoint and
-    // derive the user from the *verified* claims, not from the body.
-    res.json({ accessToken: 'stub', user: { legionId: req.body?.user?._id } })
+  app.post('/api/legion-auth', async (req, res) => {
+    const verified = await verifyPlayerToken(req.body?.token)
+    if (!verified) return res.status(401).json({ error: 'invalid token' })
+    res.json({ user: { legionId: String(verified.user._id), username: verified.user.username } })
   })
 }
 
@@ -65,8 +64,18 @@ const server = defineServer({
 
 // SIGTERM (a deploy or scale-in) runs Colyseus' graceful shutdown: every room saves
 // and hands its players to another pod (GameRoom.onBeforeShutdown), then this.
-server.onShutdown(() => closeStorage())
+server.onShutdown(async () => {
+  for (const room of liveRooms) room.collectScores()
+  await flushScores()
+  await closeStorage()
+})
 
 await server.listen(PORT)
 startLeaderboards()
+// Boxity: this pod's rooms for "Open Rooms" and join-by-id, and the leaderboard scores.
+// Both do nothing outside a Boxity deployment.
+installRoomReporter()
+installScoreReporter(() => {
+  for (const room of liveRooms) room.collectScores()
+})
 console.log(`[server] listening on port ${PORT}${process.env.POD_NAME ? ` (${process.env.POD_NAME}, ${process.env.BLOXITY_CHANNEL})` : ''}`)

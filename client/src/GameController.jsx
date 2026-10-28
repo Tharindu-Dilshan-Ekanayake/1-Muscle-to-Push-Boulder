@@ -57,9 +57,13 @@ export function GameController() {
     return stop
   }, [])
 
+  // Signing in (or out) once already playing reconnects as the new you - into the same
+  // room, so friends stay together.
+  const connected = useRef(false)
   useEffect(() => {
     if (!settled) return undefined
-    startConnection({ id: playerId || guestId(), name: nameRef.current })
+    startConnection({ id: playerId || guestId(), name: nameRef.current }, connected.current ? { mode: 'rejoin' } : undefined)
+    connected.current = true
     return stopConnection
   }, [settled, playerId])
 

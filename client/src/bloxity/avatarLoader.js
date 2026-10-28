@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 
 import { configureAvatarTexture } from '../game/avatarRig'
-import { assetUrls, isRealId, PART_SLOTS, skinCompositeUrl, skinIdOrDefault } from './avatarAssets'
+import { assetUrls, isRealId, ITEM_SLOTS, PART_SLOTS, skinCompositeUrl, skinIdOrDefault } from './avatarAssets'
 
 /**
  * Imperative loaders for the equipped-cosmetic assets.
@@ -94,14 +94,18 @@ export function loadLook(equipped) {
     jobs.push(loadPartGLB(assetUrls.part(slot, id)).then((scene) => ({ kind: 'part', slot, scene })))
   }
 
-  // Accessories.
-  for (const [kind, idKey, meshUrl, texUrl] of [
-    ['hat', 'hatId', assetUrls.hatMesh, assetUrls.hatTexture],
-    ['back', 'backId', assetUrls.backMesh, assetUrls.backTexture],
-  ]) {
+  // Items: hats, hair, masks, back and the accessories - each mesh with its texture.
+  for (const { kind, idKey, folder } of ITEM_SLOTS) {
     const id = equipped?.[idKey]
     if (!isRealId(id)) continue
-    jobs.push(Promise.all([loadOBJ(meshUrl(id)), loadTexture(texUrl(id))]).then(([object, texture]) => ({ kind: 'accessory', accessory: kind, object, texture })))
+    jobs.push(
+      Promise.all([loadOBJ(assetUrls.itemMesh(folder, id)), loadTexture(assetUrls.itemTexture(folder, id))]).then(([object, texture]) => ({
+        kind: 'accessory',
+        accessory: kind,
+        object,
+        texture,
+      })),
+    )
   }
   return Promise.all(jobs)
 }

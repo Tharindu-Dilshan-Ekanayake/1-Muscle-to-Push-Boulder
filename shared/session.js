@@ -123,6 +123,8 @@ export class PlayerSession {
      * boulder's; free, it's the stage the SAFEZONE leads up to.
      */
     this.push = null
+    /** Wins earned climbing (WINS pads and orbs) not yet counted towards a leaderboard. */
+    this.winsEarned = 0
     /** Server time until which a new push can't start (just after one ended). */
     this.busyUntil = 0
     /** Lifts banked (a token bucket refilling at MAX_LIFTS_PER_SECOND), and when last refilled. */
@@ -295,6 +297,7 @@ export class PlayerSession {
         const wins = Math.max(1, Math.round(pad.wins * winsMultiplier(this.profile, now)))
         const top = pad.stage === track.stages.length - 1
         this.profile.wins += wins
+        this.winsEarned += wins
         this.dirty = true
         this.emit('pushReward', { wins, stage: pad.stage, top })
         this.tutorial('cashIn')
@@ -321,6 +324,7 @@ export class PlayerSession {
       climb.orbs.push(orb.index)
       const wins = Math.max(1, Math.round(orb.wins * winsMultiplier(this.profile, now)))
       this.profile.wins += wins
+      this.winsEarned += wins
       this.dirty = true
       this.emit('orb', { index: orb.index, wins })
     },

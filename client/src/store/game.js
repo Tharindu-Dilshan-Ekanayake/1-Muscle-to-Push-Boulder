@@ -58,6 +58,13 @@ export const useGame = create((set) => ({
 
   /** True while you're up the mountain (the frame-rate state is push in pushControl). */
   pushing: false,
+  /** True while Boxity shows an ad break: the game stands still. */
+  paused: false,
+  /**
+   * Crushed, and waiting to respawn (Boxity's death screen):
+   * `{ stage, need, seconds }`, seconds being Boxity's countdown (0: Respawn may be pressed).
+   */
+  death: null,
   /** Up the mountain: 'push' (pushing a boulder) or 'free' (walking a SAFEZONE); null in the plaza. */
   climb: null,
   /** The big message of the moment up the track: { kind: 'clear' | 'crushed' | 'top', ..., id }. */
@@ -87,6 +94,8 @@ export const useGame = create((set) => ({
   closePanel: () => set({ panel: null, panelData: null }),
   togglePanel: (panel) => set((s) => (s.panel === panel ? { panel: null, panelData: null } : { panel, panelData: null })),
 
+  setPaused: (paused) => set({ paused }),
+  setDeath: (death) => set({ death }),
   setPushing: (pushing) => set(pushing ? { pushing, panel: null, panelData: null } : { pushing, pushBanner: null }),
   setClimb: (climb) => set({ climb }),
   showPushBanner: (banner) => set({ pushBanner: banner ? { ...banner, id: performance.now() } : null }),

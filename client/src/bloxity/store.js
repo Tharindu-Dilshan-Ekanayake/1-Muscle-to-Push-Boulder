@@ -20,6 +20,10 @@ export const DEFAULT_PROPORTIONS = Object.freeze({
 export const useBloxityStore = create((set) => ({
   /** @type {'idle'|'loading'|'ready'|'error'} */
   status: 'idle',
+  /** True inside Boxity (its page around the game): no buttons of ours that Boxity draws. */
+  embedded: false,
+  /** Boxity's own controls over the game: [{ id: 'toolbar' | 'chat', left, top, width, height }] (CSS px). */
+  reserved: [],
   /** @type {Error|null} */
   error: null,
 
