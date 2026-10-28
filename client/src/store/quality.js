@@ -25,21 +25,15 @@ export const PRESETS = {
     cloudCount: 8,
     /** Max side of any generated texture. */
     maxTexture: 512,
-    /**
-     * Other players are drawn this far away - the whole lobby, as the blocky figures
-     * are one draw call for everybody - and the nearest `remoteAvatars` of them within
-     * `remoteAvatarDistance` as their real avatar.
-     */
+    /** Other players' shadows and pets show this far away (their avatars, however far). */
     remoteDrawDistance: 150,
-    remoteAvatars: 3,
-    remoteAvatarDistance: 45,
     remoteNameDistance: 40,
     /** World labels fade out past this. */
     labelDistance: 70,
     /** How much of the canyon's scenery to spawn (0-1). */
     decorDensity: 0.45,
-    /** Board and egg halo size multiplier. */
-    boardGlow: 0.8,
+    /** Dumbbell, egg and aura halo size multiplier. */
+    glow: 0.8,
   },
   MEDIUM: {
     dpr: 1.25,
@@ -54,12 +48,10 @@ export const PRESETS = {
     cloudCount: 14,
     maxTexture: 1024,
     remoteDrawDistance: 150,
-    remoteAvatars: 5,
-    remoteAvatarDistance: 60,
     remoteNameDistance: 55,
     labelDistance: 110,
     decorDensity: 0.75,
-    boardGlow: 1,
+    glow: 1,
   },
   HIGH: {
     dpr: 1.5,
@@ -74,12 +66,10 @@ export const PRESETS = {
     cloudCount: 18,
     maxTexture: 1024,
     remoteDrawDistance: 150,
-    remoteAvatars: 7,
-    remoteAvatarDistance: 80,
     remoteNameDistance: 70,
     labelDistance: 150,
     decorDensity: 1,
-    boardGlow: 1,
+    glow: 1,
   },
 }
 
@@ -94,18 +84,11 @@ function isMobileDevice() {
 }
 
 /**
- * Picks a starting preset from the hardware. Deliberately pessimistic: the monitor can
- * only ever drop a level, so starting too high costs a few janky seconds, while
- * starting too low costs nothing.
+ * Everyone starts on LOW, whatever the hardware: the game opens fast and smooth
+ * everywhere, and anyone who wants more picks MEDIUM or HIGH in Settings (which is
+ * remembered). The monitor only ever drops a level, never raises one.
  */
-export function detectQuality() {
-  if (typeof navigator === 'undefined') return 'MEDIUM'
-  const cores = navigator.hardwareConcurrency || 4
-  const memory = navigator.deviceMemory || 8
-  if (isMobileDevice() || cores <= 4) return 'LOW'
-  if (cores <= 8 || memory <= 4) return 'MEDIUM'
-  return 'HIGH'
-}
+export const DEFAULT_QUALITY = 'LOW'
 
 function readSaved() {
   try {
@@ -116,7 +99,7 @@ function readSaved() {
   }
 }
 
-const initialLevel = readSaved() || detectQuality()
+const initialLevel = readSaved() || DEFAULT_QUALITY
 
 export const useQuality = create((set, get) => ({
   level: initialLevel,

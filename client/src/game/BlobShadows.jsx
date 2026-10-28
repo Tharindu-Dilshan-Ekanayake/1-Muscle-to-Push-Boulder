@@ -2,11 +2,11 @@ import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import { Color, InstancedMesh, Matrix4, PlaneGeometry, Quaternion, ShaderMaterial, Vector3 } from 'three'
 
-import { groundHeightAt, SLIDE_START_Z, SLOPE_ANGLE } from '@shared/world'
+import { groundHeightAt, TRACK_START_Z } from '@shared/world'
 
 import { useQuality } from '../store/quality'
 import { runtime } from './runtime'
-import { slopeY } from './slide/path'
+import { floorY, meterAtZ, tiltAt } from './push/path'
 
 const MAX_BLOBS = 48
 
@@ -35,9 +35,8 @@ const fragmentShader = /* glsl */ `
 `
 
 const _m = new Matrix4()
-const _q = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -Math.PI / 2)
-/** Lying on the slope instead of the flat. */
-const _qSlope = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -Math.PI / 2 - SLOPE_ANGLE)
+const _q = new Quaternion()
+const _xAxis = new Vector3(1, 0, 0)
 const _p = new Vector3()
 const _s = new Vector3()
 
@@ -91,15 +90,17 @@ export function BlobShadows() {
       if (i >= MAX_BLOBS) break
       if (caster.visible === false) continue
       const p = caster.position
-      // Shrinks as the caster rises, like a real contact shadow. Down the hill, it lies
-      // on the slope.
-      const onSlope = p.z < SLIDE_START_Z
-      const floor = onSlope ? slopeY(p.z) : groundHeightAt(p.x, p.z)
+      // Shrinks as the caster rises, like a real contact shadow. Up the track, it lies
+      // along the floor there: tipped on a slope, level on a SAFEZONE.
+      const onTrack = p.z < TRACK_START_Z
+      const meter = onTrack ? meterAtZ(p.z) : 0
+      const floor = onTrack ? floorY(meter) : groundHeightAt(p.x, p.z)
       const lift = Math.max(0, p.y - floor)
       const size = caster.size * Math.max(0.35, 1 - lift * 0.12)
       _p.set(p.x, floor + 0.04, p.z)
-      _s.set(size, onSlope ? size * 1.6 : size, 1)
-      mesh.setMatrixAt(i, _m.compose(_p, onSlope ? _qSlope : _q, _s))
+      _s.set(size, size, 1)
+      _q.setFromAxisAngle(_xAxis, -Math.PI / 2 + (onTrack ? tiltAt(meter) : 0))
+      mesh.setMatrixAt(i, _m.compose(_p, _q, _s))
       i += 1
     }
     mesh.count = i

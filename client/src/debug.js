@@ -1,7 +1,8 @@
+import { useBloxityStore } from './bloxity/store'
 import { runtime } from './game/runtime'
-import { slide } from './game/slide/slideControl'
+import { push } from './game/push/pushControl'
 import { actions } from './net/actions'
-import { remotePlayers } from './net/remotePlayers'
+import { remotePlayers, upsertRemotePlayer } from './net/remotePlayers'
 import { useGame } from './store/game'
 import { useQuality } from './store/quality'
 
@@ -12,5 +13,5 @@ import { useQuality } from './store/quality'
 export function installDebugHooks() {
   if (typeof window === 'undefined') return
   if (!new URLSearchParams(window.location.search).has('debug')) return
-  window.__pp = { runtime, useGame, useQuality, actions, remotePlayers, slide }
+  window.__pp = { runtime, useGame, useQuality, actions, remotePlayers, upsertRemotePlayer, push, bloxity: useBloxityStore }
 }

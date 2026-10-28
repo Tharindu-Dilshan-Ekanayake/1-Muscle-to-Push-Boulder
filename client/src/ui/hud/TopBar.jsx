@@ -1,11 +1,8 @@
 import { useEffect, useState } from 'react'
 
-import { dailyStatus } from '@shared/logic'
-
 import { isMuted, onMutedChange, setMuted } from '../../audio/sfx'
 import { useGame } from '../../store/game'
 import AuthHUD from '../AuthHUD'
-import useNow from '../useNow'
 import Icon from '../Icon'
 import { AlertBadge, ChunkyButton } from './parts'
 import { GRADIENTS, u } from './style'
@@ -27,20 +24,15 @@ function SoundButton() {
 }
 
 /**
- * The top-right corner: sound, daily rewards, leaderboards and your name tag. The
- * top-left is deliberately left clear for the game's logo.
+ * The top-right corner: sound, leaderboards and your name tag. (Daily rewards are the
+ * Gifts tile on the left.)
  */
 export function TopBar() {
   const openPanel = useGame((s) => s.openPanel)
-  const daily = useGame((s) => s.profile.daily)
-  const profile = useGame((s) => s.profile)
-  const now = useNow(10000)
-  const dailyReady = dailyStatus({ ...profile, daily }, now).some((d) => d.state === 'ready')
 
   return (
     <div className="pointer-events-none absolute flex items-center" style={{ right: u(16), top: u(14), gap: u(12) }}>
       <SoundButton />
-      <RoundButton icon="calendar" label="Daily Rewards" alert={dailyReady} onClick={() => openPanel('daily')} />
       <RoundButton icon="star" label="Leaderboards" onClick={() => openPanel('leaderboards')} iconSize={34} />
       <AuthHUD />
     </div>

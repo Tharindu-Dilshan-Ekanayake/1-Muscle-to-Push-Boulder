@@ -33,6 +33,7 @@ const LINE_GAP = 0.04
 const vertexShader = /* glsl */ `
   attribute vec2 aCorner;
   attribute float aFade;
+  attribute float aNear;
   uniform float uMaxDistance;
   varying vec2 vUv;
   varying float vAlpha;
@@ -40,11 +41,11 @@ const vertexShader = /* glsl */ `
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
     float d = -mv.z;
     // Shrink when the camera gets close, so a sign never fills the screen, and fade
-    // right out at arm's length.
+    // right out once it's nearer than its near distance (arm's length, for most).
     mv.xy += aCorner * clamp(d / 18.0, 0.4, 1.0);
     gl_Position = projectionMatrix * mv;
     float far = min(aFade, uMaxDistance);
-    vAlpha = (1.0 - smoothstep(far * 0.75, far, d)) * smoothstep(2.5, 6.0, d);
+    vAlpha = (1.0 - smoothstep(far * 0.75, far, d)) * smoothstep(aNear * 0.42, aNear, d);
     vUv = uv;
   }
 `
@@ -173,11 +174,12 @@ export class LabelBatch {
    * @param {string} id
    * @param {[number, number, number]} position world-space centre
    * @param {object} spec see file comment
-   * @param {{ fade?: number, reserve?: object }} [options] `reserve` is a spec at least
-   *   as large as anything `update` will later draw here.
+   * @param {{ fade?: number, near?: number, reserve?: object }} [options] `fade`: gone by
+   *   this far away; `near`: gone by this close (one you walk right under can fade out
+   *   early); `reserve`: a spec at least as large as anything `update` will later draw here.
    */
-  add(id, position, spec, { fade = 140, reserve } = {}) {
-    this.labels.set(id, { id, position, spec, fade, reserve })
+  add(id, position, spec, { fade = 140, near = 6, reserve } = {}) {
+    this.labels.set(id, { id, position, spec, fade, near, reserve })
     return this
   }
 
@@ -278,6 +280,7 @@ export class LabelBatch {
     const corners = new Float32Array(n * 8)
     const uvs = new Float32Array(n * 8)
     const fades = new Float32Array(n * 4)
+    const nears = new Float32Array(n * 4)
     const index = new Uint16Array(n * 6)
     const size = this.pageSize
 
@@ -301,6 +304,7 @@ export class LabelBatch {
         corners.set([cx, cy], vi * 2)
         uvs.set([u, v], vi * 2)
         fades[vi] = l.fade
+        nears[vi] = l.near ?? 6
       })
       index.set([i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3], i * 6)
     })
@@ -310,6 +314,7 @@ export class LabelBatch {
     geometry.setAttribute('aCorner', new BufferAttribute(corners, 2))
     geometry.setAttribute('uv', new BufferAttribute(uvs, 2))
     geometry.setAttribute('aFade', new BufferAttribute(fades, 1))
+    geometry.setAttribute('aNear', new BufferAttribute(nears, 1))
     geometry.setIndex(new BufferAttribute(index, 1))
     return geometry
   }

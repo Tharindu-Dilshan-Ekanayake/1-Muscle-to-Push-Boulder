@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { lift } from '../game/lift'
 import { runtime } from '../game/runtime'
+import { useGame } from '../store/game'
 import { GRADIENTS } from './hud/style'
+import { iconUrl } from './icons'
 
 /** Joystick travel radius, in CSS pixels. */
 const RADIUS = 56
@@ -21,14 +24,20 @@ const roundButton = (size, background) => ({
 
 /**
  * On-screen controls for touch devices: a floating joystick that appears wherever the
- * left side of the screen is touched, and a jump button. Everything else is walking
- * onto things: the slide zone, a treadmill, a pad.
+ * left side of the screen is touched (pushing a boulder, it pushes and steers), a big
+ * LIFT button and a jump button (at a boulder, LIFT gives way to the prompt's PUSH
+ * button, held to take it). Everything else is walking up to things - a Train Zone, a
+ * pad - or tapping their prompt.
  *
  * Writes straight into `runtime.input` and moves the knob through refs, so dragging
  * never re-renders React.
  */
 export function TouchControls() {
   const [isTouch, setIsTouch] = useState(detectTouch)
+  const pushingBoulder = useGame((s) => s.climb === 'push')
+  // At a boulder LIFT makes way for the prompt's PUSH button, in the same spot.
+  const atBoulder = useGame((s) => s.zone.pushZone || s.zone.climbBoulder >= 0)
+  const ready = useGame((s) => s.playable)
   const baseRef = useRef(null)
   const knobRef = useRef(null)
   const active = useRef({ id: null, x: 0, y: 0 })
@@ -114,8 +123,9 @@ export function TouchControls() {
             width: RADIUS * 2,
             height: RADIUS * 2,
             opacity: 0.35,
-            left: RADIUS,
-            // Resting low in the corner, clear of the menu tiles above it.
+            left: RADIUS * 2.6,
+            // Resting low down, clear of the menu tiles above and the Wins and Muscle
+            // in the corner.
             top: `calc(100% - ${RADIUS * 2.3}px)`,
           }}
         >
@@ -126,6 +136,25 @@ export function TouchControls() {
           />
         </div>
       </div>
+
+      {ready && !pushingBoulder && !atBoulder && (
+        <button
+          type="button"
+          aria-label="Lift"
+          className="pp-btn pp-chunky pp-pulse absolute z-20 flex touch-none flex-col items-center justify-center rounded-full"
+          style={{ ...roundButton(104, GRADIENTS.goldButton), right: 96, bottom: 12 }}
+          onPointerDown={(e) => {
+            e.preventDefault()
+            lift()
+          }}
+        >
+          <span className="pp-gloss" style={{ borderRadius: '52px 52px 30px 30px' }} />
+          <img src={iconUrl('muscle')} alt="" width="58" height="58" draggable={false} />
+          <span className="pp-stroke" style={{ fontSize: 18, marginTop: -6 }}>
+            LIFT
+          </span>
+        </button>
+      )}
 
       <button
         type="button"

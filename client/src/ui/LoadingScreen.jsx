@@ -5,12 +5,14 @@ import { iconUrl } from './icons'
 import StrokeText from './StrokeText'
 
 const TIPS = [
-  'Run on a treadmill to gain Slide automatically!',
-  'Rebirth at max level for x1.5 more Slide and a higher level cap.',
-  'More Slide = longer slides = more Wins!',
-  'Spend Wins on better boards and eggs.',
-  'Pets multiply all the Slide you gain.',
-  'You gain +1 Slide every second you slide down the hill!',
+  'Every click gives you Muscle!',
+  'Stand in a Train Zone to train automatically.',
+  'More Muscle = push the boulder further = more Wins!',
+  'Spend Wins on better dumbbells and eggs.',
+  'Rebirth at max level for x1.5 more Muscle per rebirth.',
+  'WATCH OUT! If you are not strong enough, the boulder will CRUSH you!',
+  'Let go of the boulder and it rolls back to the last SAFEZONE.',
+  'Your power drains as you push. When it hits 0, the boulder rolls back on you!',
 ]
 
 /**
@@ -46,16 +48,16 @@ export function LoadingScreen({ done }) {
       className="pp-font absolute inset-0 z-[100] flex flex-col items-center justify-center gap-8 transition-opacity duration-500"
       style={{
         opacity: done ? 0 : 1,
-        background: 'linear-gradient(180deg, #2f8ff2 0%, #6fc0fb 55%, #c6ec86 55.2%, #a9dd6a 100%)',
+        background: 'linear-gradient(180deg, #2f8ff2 0%, #6fc0fb 55%, #a4cdee 55.2%, #8bbbe2 100%)',
       }}
     >
       <div className="pp-loading-disc" aria-hidden="true">
-        <img src={iconUrl('slide')} alt="" width="150" height="150" draggable={false} />
+        <img src={iconUrl('muscle')} alt="" width="150" height="150" draggable={false} />
       </div>
 
       <h1 className="m-0 text-center leading-none" style={{ fontSize: 'clamp(40px, 9vw, 96px)', transform: 'rotate(-3deg)' }}>
         <StrokeText stroke="0.16em" gradient="linear-gradient(180deg, #ffffff 0%, #ffffff 55%, #ffe36b 56%, #ffb21e 100%)">
-          +1 SLIDE DOWNHILL
+          +1 MUSCLE TO PUSH BOULDER
         </StrokeText>
       </h1>
 

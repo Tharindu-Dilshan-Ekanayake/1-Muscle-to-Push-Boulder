@@ -7,12 +7,11 @@ import { createProfile, createSession } from '@shared/logic'
  * Everything the UI renders from. Written by the network layer (profile, events) and
  * the 10 Hz game ticker (zones, timers) - never from a frame loop.
  *
- * Components must select narrowly (`useGame((s) => s.profile.wins)`), so a Slide tick
- * re-renders the Slide label and nothing else.
+ * Components must select narrowly (`useGame((s) => s.profile.wins)`), so a Muscle tick
+ * re-renders the Muscle label and nothing else.
  */
 
-
-export const useGame = create((set, get) => ({
+export const useGame = create((set) => ({
   /** Authoritative copy of the player's save, as last sent by the server. */
   profile: createProfile('local', 'Player'),
   /** Per-connection state: session start, claimed playtime rewards. */
@@ -37,24 +36,41 @@ export const useGame = create((set, get) => ({
   leaderboards: null,
 
   /** Where the player is standing, from the ticker. */
-  zone: { treadmill: -1, treadmillNear: -1, slideZone: false, pad: -1, egg: null, portal: null, freeReward: false, sphinx: false },
+  zone: {
+    trainZone: -1,
+    trainZoneNear: -1,
+    pushZone: false,
+    pad: -1,
+    egg: null,
+    portal: null,
+    freeReward: false,
+    sphinx: false,
+    auras: false,
+    potions: false,
+    /** Up the mountain, in a SAFEZONE by the next boulder: that stage's index, else -1. */
+    climbBoulder: -1,
+  },
 
   /** Which modal panel is open: 'rebirth' | 'daily' | 'pets' | 'items' | 'store' | ... */
   panel: null,
   /** Extra data for the open panel (e.g. which egg the hatch panel is for). */
   panelData: null,
 
-  /** A slide in progress: { distance, wins, duration, best }. */
-  slide: null,
-  /** Wins earned by the current slide, held back from the HUD until you stop. */
-  pendingWins: 0,
-  /** "+N Wins!" result once you've stopped. */
-  slideResult: null,
+  /** True while you're up the mountain (the frame-rate state is push in pushControl). */
+  pushing: false,
+  /** Up the mountain: 'push' (pushing a boulder) or 'free' (walking a SAFEZONE); null in the plaza. */
+  climb: null,
+  /** The big message of the moment up the track: { kind: 'clear' | 'crushed' | 'top', ..., id }. */
+  pushBanner: null,
+  /**
+   * The Wins the counter shows while a cashed-in climb's Wins fly home to it (it counts up
+   * as each trophy lands); null the rest of the time, when it shows your Wins.
+   */
+  winsShown: null,
   /** Active hatch animation: { eggId, pets }. */
   hatch: null,
   /** Keep hatching the egg you're standing at (the T button). Client-side only. */
   autoHatch: false,
-
 
   // --- Actions -----------------------------------------------------------------
 
@@ -71,18 +87,15 @@ export const useGame = create((set, get) => ({
   closePanel: () => set({ panel: null, panelData: null }),
   togglePanel: (panel) => set((s) => (s.panel === panel ? { panel: null, panelData: null } : { panel, panelData: null })),
 
-  /** kind: 'info' | 'error' | 'success' | 'badge' */
-
-  startSlide: (slide) => set({ slide, pendingWins: slide.wins }),
-  endSlide: () => {
-    const { slide } = get()
-    set({
-      slide: null,
-      pendingWins: 0,
-      slideResult: slide ? { wins: slide.wins, distance: slide.distance, best: slide.best, id: Date.now() } : null,
-    })
-  },
-  clearSlideResult: () => set({ slideResult: null }),
+  setPushing: (pushing) => set(pushing ? { pushing, panel: null, panelData: null } : { pushing, pushBanner: null }),
+  setClimb: (climb) => set({ climb }),
+  showPushBanner: (banner) => set({ pushBanner: banner ? { ...banner, id: performance.now() } : null }),
+  /** Holds the Wins counter at `wins` (what you had before a payout), for the Wins on their way to it. */
+  holdWins: (wins) => set((s) => ({ winsShown: s.winsShown ?? Math.min(wins, s.profile.wins) })),
+  /** Some of them have landed: the counter counts up (never past your real Wins). */
+  landWins: (amount) => set((s) => (s.winsShown === null ? {} : { winsShown: Math.min(s.profile.wins, Math.round(s.winsShown + amount)) })),
+  /** All home: the counter shows your Wins again. */
+  showWins: () => set({ winsShown: null }),
 
   setHatch: (hatch) => set({ hatch }),
   setAutoHatch: (autoHatch) => set({ autoHatch }),

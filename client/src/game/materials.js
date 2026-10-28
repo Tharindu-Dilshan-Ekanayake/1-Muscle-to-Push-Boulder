@@ -38,6 +38,12 @@ export const STYLE = {
   WATER: 11,
   /** Treadmill belt: dark rubber with ribs scrolling east along the top. */
   BELT: 12,
+  /** Big square studs, as on the track's cliffs in the reference. */
+  BLOCK: 13,
+  /** Big square studs with a grass cap and lip: the reference's grassy cliffs. */
+  BLOCK_GRASS: 14,
+  /** Big floor tiles with thin seams and a faint checker: the track's floor. */
+  TILES: 15,
 }
 
 /** Shared clock for animated styles; WorldClock advances it once per frame. */
@@ -52,6 +58,7 @@ const vertexHead = /* glsl */ `
   varying vec3 vToyNormal;
   varying float vToyStyle;
   varying float vToyTop;
+  varying float vToyDepth;
 `
 
 const vertexBody = /* glsl */ `
@@ -68,6 +75,12 @@ const vertexBody = /* glsl */ `
   vToyNormal = normalize(mat3(modelMatrix) * toyN);
   vToyTop = (modelMatrix * toyTop).y;
   vToyStyle = aStyle;
+  #ifdef USE_INSTANCING
+    // How far below a box's top, along its own up: exact even tipped up a slope.
+    vToyDepth = (0.5 - transformed.y) * length(instanceMatrix[1].xyz);
+  #else
+    vToyDepth = vToyTop - vToyPos.y;
+  #endif
 `
 
 const fragmentHead = /* glsl */ `
@@ -78,6 +91,7 @@ const fragmentHead = /* glsl */ `
   varying vec3 vToyNormal;
   varying float vToyStyle;
   varying float vToyTop;
+  varying float vToyDepth;
 
   float toyHash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -109,6 +123,33 @@ const fragmentHead = /* glsl */ `
     float hl = 1.0 - smoothstep(0.1, 0.2, abs(f.x - f.y));
     float shade = 1.0 - line * 0.28 + hl * 0.06;
     return mix(shade, 0.92, smoothstep(0.2, 0.5, aa));
+  }
+
+  // Big square stud: a raised square in each cell, its bevel lit from the upper left,
+  // in a dark groove. Fades to its average far off.
+  float toyBlock(vec2 p) {
+    vec2 w = fwidth(p);
+    float aa = max(max(w.x, w.y), 1e-4);
+    vec2 c = fract(p) - 0.5;
+    float e = max(abs(c.x), abs(c.y));
+    float seam = smoothstep(0.455 - aa, 0.455 + aa, e);
+    float inner = 1.0 - smoothstep(0.3 - aa, 0.3 + aa, e);
+    float bevel = clamp((c.y - c.x) / max(e, 1e-3), -1.0, 1.0) * 0.13;
+    float shade = mix(1.0 + bevel, 1.05, inner) * (1.0 - seam * 0.32);
+    // Each stud a shade lighter or darker than the next, so a cliff isn't one flat colour.
+    float tint = 0.92 + 0.15 * toyHash(floor(p));
+    return mix(shade * tint, 0.95, smoothstep(0.2, 0.5, aa));
+  }
+
+  // Big floor tile: thin seams and a faint checker.
+  float toyFloor(vec2 p) {
+    vec2 w = fwidth(p);
+    float aa = max(max(w.x, w.y), 1e-4);
+    vec2 f = abs(fract(p) - 0.5);
+    float seam = smoothstep(0.475 - aa, 0.475 + aa, max(f.x, f.y));
+    vec2 cell = floor(p);
+    float check = mod(cell.x + cell.y, 2.0) * 0.045;
+    return mix(1.0 + check - seam * 0.2, 0.99, smoothstep(0.25, 0.6, aa));
   }
 
   vec3 toyHue(float h) {
@@ -185,11 +226,22 @@ const fragmentBody = /* glsl */ `
       float streak = isTop ? 0.5 + 0.5 * sin(vToyPos.x * 2.0 + vToyPos.z * 1.3 + uTime * 3.0) : smoothstep(0.7, 1.0, fall);
       col = mix(col, vec3(0.92, 0.98, 1.0), streak * 0.65);
       totalEmissiveRadiance += col * 0.25;
-    } else if (isTop) {
-      // Belt: ribs running east under the runner's feet.
-      vec2 bw = fwidth(vToyPos.xz);
-      float rib = smoothstep(0.72, 0.86, fract(vToyPos.x * 1.6 - uTime * 2.4));
-      col = mix(col, col * 2.4 + vec3(0.07), rib * 0.8 * (1.0 - smoothstep(0.15, 0.4, bw.x)));
+    } else if (style < 13.0) {
+      if (isTop) {
+        // Belt: ribs running east under the runner's feet.
+        vec2 bw = fwidth(vToyPos.xz);
+        float rib = smoothstep(0.72, 0.86, fract(vToyPos.x * 1.6 - uTime * 2.4));
+        col = mix(col, col * 2.4 + vec3(0.07), rib * 0.8 * (1.0 - smoothstep(0.15, 0.4, bw.x)));
+      }
+    } else if (style < 14.0) {
+      col *= toyBlock(suv * 0.62);
+      // A band of light along the top edge of each block.
+      if (!isTop && vToyDepth < 0.14) col *= 1.16;
+    } else if (style < 15.0) {
+      if (isTop || vToyDepth < 0.55) col = uGrass * (isTop ? 1.0 : 0.86);
+      col *= toyBlock(suv * 0.62);
+    } else {
+      col *= toyFloor(suv / 2.25);
     }
 
     diffuseColor.rgb = col;
@@ -227,7 +279,7 @@ export function createToyMaterial({
       .replace('#include <color_fragment>', `#include <color_fragment>\n${fragmentBody}`)
   }
   // The stud scale is a uniform, so materials differing only in it share a program.
-  material.customProgramCacheKey = () => 'toy-v2'
+  material.customProgramCacheKey = () => 'toy-v3'
   return material
 }
 

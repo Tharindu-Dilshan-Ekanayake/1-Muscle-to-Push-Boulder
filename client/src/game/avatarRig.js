@@ -13,6 +13,7 @@ import {
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 import { BACK_BONE, HAT_BONE, NECK_OFFSET_BONE, PART_SLOTS } from '../bloxity/avatarAssets'
+import { BODY_OFFSETS, buildMusclePart, MUSCLE_SLOTS } from './muscleBody'
 import { computePose, POSED_BONES } from './playerPose'
 
 /**
@@ -55,6 +56,8 @@ export function collectRig(root) {
     originalGeometries: {},
     /** bone name -> { bone, origPos, origQuat, origScale } */
     bones: {},
+    /** The merged body (see mergeBody), whose one morph is how built it is. */
+    body: null,
     hatBone: null,
     backBone: null,
     neckOffsetBindY: 0,
@@ -285,6 +288,52 @@ function plainGeometry(source) {
   return out
 }
 
+/** Skin index of a rig's bone, by name. */
+const boneIndexer = (rig) => (name) => rig.skeleton.bones.findIndex((b) => b.name === name)
+
+/**
+ * Builds the rig's rounded body parts (see muscleBody) ahead of mergeBody, one part a
+ * moment when the page is idle, so the first avatar's body never lands as one long
+ * stall (the parts are shared, so later avatars find them built). Returns a cancel.
+ */
+export function prepareMuscleParts(rig) {
+  const slots = rig.skeleton ? MUSCLE_SLOTS.filter((slot) => rig.originalGeometries[slot]) : []
+  const later = (fn) => (window.requestIdleCallback ? window.requestIdleCallback(fn, { timeout: 1500 }) : setTimeout(fn, 0))
+  let handle = null
+  let done = false
+  const next = () => {
+    const slot = slots.shift()
+    if (!slot || done) return
+    buildMusclePart(slot, rig.originalGeometries[slot], boneIndexer(rig))
+    handle = later(next)
+  }
+  handle = later(next)
+  return () => {
+    done = true
+    if (window.cancelIdleCallback) window.cancelIdleCallback(handle)
+    clearTimeout(handle)
+  }
+}
+
+/**
+ * A part's piece of the merged body: the game's own rounded body part (muscleBody) for
+ * the torso, arms and legs - from the part's original box - and the part's own geometry
+ * otherwise (the head), with nothing to morph.
+ */
+function bodyPiece(rig, mesh) {
+  const slot = MUSCLE_SLOTS.find((s) => rig.partMeshes[s] === mesh)
+  const source = slot ? rig.originalGeometries[slot] : null
+  if (source) {
+    return buildMusclePart(slot, source, boneIndexer(rig)).clone()
+  }
+  const piece = plainGeometry(mesh.geometry)
+  const count = piece.getAttribute('position').count
+  piece.morphAttributes.position = [new BufferAttribute(new Float32Array(count * 3), 3)]
+  piece.morphAttributes.normal = [new BufferAttribute(new Float32Array(count * 3), 3)]
+  piece.morphTargetsRelative = true
+  return piece
+}
+
 /**
  * Merges the six body parts into one skinned mesh on the same skeleton, so a whole
  * character is one draw call instead of six. The parts stay (hidden) as the source for
@@ -294,10 +343,12 @@ function plainGeometry(source) {
 export function mergeBody(rig) {
   const parts = rig.skinnedMeshes
   if (!rig.skeleton || parts.length === 0) return null
-  const pieces = parts.map((mesh) => plainGeometry(mesh.geometry))
+  const pieces = parts.map((mesh) => bodyPiece(rig, mesh))
   const geometry = mergeGeometries(pieces, false)
   for (const piece of pieces) piece.dispose()
   if (!geometry) return null
+  // The pieces' morphs are offsets; mergeGeometries keeps them but not that flag.
+  geometry.morphTargetsRelative = true
   const body = new SkinnedMesh(geometry, new MeshLambertMaterial({ map: parts[0].material?.map ?? null }))
   body.name = 'merged_body'
   body.castShadow = true
@@ -307,6 +358,7 @@ export function mergeBody(rig) {
   parts[0].parent.add(body)
   body.bind(rig.skeleton, parts[0].bindMatrix)
   for (const mesh of parts) mesh.visible = false
+  rig.body = body
   return body
 }
 
@@ -349,21 +401,32 @@ export function attachAccessory(rig, kind, object) {
  * (`shoulderWidth`, `torsoScaleX`, `legOffsetX`) are not implemented in the SDK's
  * preview renderer; they are applied here in the spirit of their names and are the
  * ones to sanity-check against the portal.
+ *
+ * `bulk` (see playerPose.bulkFor) then builds the body: skinny when you start, a
+ * bodybuilder in the end - the rounded body's morph (see muscleBody), the shoulders and
+ * hips moved out to match and a little height, the head left its own size.
  */
-export function applyProportions(rig, proportions) {
+export function applyProportions(rig, proportions, bulk = 0.5) {
   const skeleton = rig.skeleton
   if (!skeleton) return
   // Runs even with no proportions (another player's look not in yet): the reset to the
   // rest pose below is what keeps the per-frame posing from piling up rotations.
   proportions ??= {}
 
-  const height = proportions.height ?? 1
+  const built = Math.min(1, Math.max(0, bulk))
+  const { shoulder, hip, tall } = BODY_OFFSETS
+  const height = (proportions.height ?? 1) * (tall[0] + (tall[1] - tall[0]) * built)
   const armLength = proportions.armLength ?? 1
   const headScale = proportions.headScale ?? 1
   const neckHeight = proportions.neckHeight ?? 1
   const shoulderWidth = proportions.shoulderWidth ?? 1
   const torsoScaleX = proportions.torsoScaleX ?? 1
   const legOffsetX = proportions.legOffsetX ?? 1
+
+  // How far the arms and legs move out so they stay at the sides of the built body.
+  const shoulderOut = shoulder[0] + (shoulder[1] - shoulder[0]) * built
+  const hipOut = hip[0] + (hip[1] - hip[0]) * built
+  if (rig.body?.morphTargetInfluences) rig.body.morphTargetInfluences[0] = built
 
   // Overall height is a scale on the character root, not on a bone.
   rig.root.scale.set(1, height, 1)
@@ -383,7 +446,7 @@ export function applyProportions(rig, proportions) {
       bone.scale.y = origScale.y * armLength
       // Not in the SDK preview: widen the shoulders by pushing the arm roots out.
       if (name === 'ArmL_Offset' || name === 'ArmR_Offset') {
-        bone.position.x = origPos.x * shoulderWidth
+        bone.position.x = origPos.x * shoulderWidth + Math.sign(origPos.x) * shoulderOut
       }
     } else if (name === NECK_OFFSET_BONE) {
       // Keeps the head sitting on the neck as height/headScale change, then applies
@@ -402,7 +465,7 @@ export function applyProportions(rig, proportions) {
       bone.scale.x = origScale.x * torsoScaleX
     } else if (name === 'LegL_Offset' || name === 'LegR_Offset') {
       // Not in the SDK preview: leg splay, mirrored about the rig centre.
-      bone.position.x = origPos.x * legOffsetX
+      bone.position.x = origPos.x * legOffsetX + Math.sign(origPos.x) * hipOut
     }
   }
 }

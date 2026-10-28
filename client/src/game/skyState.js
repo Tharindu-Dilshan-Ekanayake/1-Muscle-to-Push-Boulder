@@ -3,7 +3,7 @@ import { Color } from 'three'
 import { SKY } from './sceneStyle'
 
 /**
- * Sky shader uniforms, module-level so other systems (the slide's zone tint, Space
+ * Sky shader uniforms, module-level so other systems (the track's stage tint, Moon Peak
  * going dark) can retint the sky without React: they write `.value` and the next frame
  * shows it.
  */

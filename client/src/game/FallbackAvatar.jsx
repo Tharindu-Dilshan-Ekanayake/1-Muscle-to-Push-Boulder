@@ -4,24 +4,25 @@ import { Color, Euler, Matrix4, Quaternion, Vector3 } from 'three'
 
 import { createBoxInstances, disposeBlocks } from './blocks'
 import { sharedMaterials, STYLE } from './materials'
-import { computePose } from './playerPose'
+import { blockyPart, bodyBuild, computePose } from './playerPose'
 
 /** Classic 5-stud figure scaled to the 1.8-unit player: one stud = S world units. */
 const S = 0.36
 
 /**
- * Parts as [pivot x, pivot y, width, height, depth, colour, joint]: limbs hang from
- * their pivot and turn by their joint's pose; head and torso are centred. The figure
- * faces +Z, so its right side is -X.
+ * Parts as [pivot y, width, height, depth, colour, joint, kind, side]: limbs hang from
+ * their pivot and turn by their joint's pose; head and torso are centred. Where each
+ * stands across, and how thick it is, comes from the build (playerPose.blockyPart).
+ * The figure faces +Z, so its right side (-1) is -X.
  */
 const PARTS = [
-  [0, 4.5, 1.2, 1, 1, '#f5cd47', null],
-  [0, 3, 2, 2, 1, '#1c1f26', null],
-  [1.5, 4, 1, 2, 1, '#f5cd47', 'ArmL1'],
-  [-1.5, 4, 1, 2, 1, '#f5cd47', 'ArmR1'],
-  [0.5, 2, 1, 2, 1, '#2d3a5c', 'LegL1'],
-  [-0.5, 2, 1, 2, 1, '#2d3a5c', 'LegR1'],
-].map(([x, y, w, h, d, color, joint]) => ({ x: x * S, y: y * S, w: w * S, h: h * S, d: d * S, color: new Color(color), joint }))
+  [4.5, 1.2, 1, 1, '#f5cd47', null, 'head', 0],
+  [3, 2, 2, 1, '#1c1f26', null, 'torso', 0],
+  [4, 1, 2, 1, '#f5cd47', 'ArmL1', 'arm', 1],
+  [4, 1, 2, 1, '#f5cd47', 'ArmR1', 'arm', -1],
+  [2, 1, 2, 1, '#2d3a5c', 'LegL1', 'leg', 1],
+  [2, 1, 2, 1, '#2d3a5c', 'LegR1', 'leg', -1],
+].map(([y, w, h, d, color, joint, kind, side]) => ({ y: y * S, w: w * S, h: h * S, d: d * S, color: new Color(color), joint, kind, side }))
 
 const RIGHT_ARM = PARTS.find((part) => part.joint === 'ArmR1')
 
@@ -32,6 +33,7 @@ const _q = new Quaternion()
 const _e = new Euler(0, 0, 0, 'XZY')
 const _p = new Vector3()
 const _s = new Vector3()
+const _b = new Vector3()
 
 /**
  * A classic blocky character, shown while the Bloxity avatar downloads (and instead of
@@ -61,13 +63,16 @@ export function FallbackAvatar({ motionRef, handRef, onReady }) {
     const instanced = ref.current
     if (!instanced) return
     const pose = computePose(motionRef.current)
+    const build = bodyBuild(motionRef.current.bulk)
     PARTS.forEach((part, i) => {
       const joint = part.joint ? pose.bones[part.joint] : null
-      _pivot.makeTranslation(part.x, part.y + pose.lift, 0)
+      blockyPart(part.kind, part.side, build, _b)
+      const x = _b.z * S
+      _pivot.makeTranslation(x, part.y + pose.lift, 0)
       _q.setFromEuler(joint ? _e.set(joint.swing, joint.twist, joint.sway) : _e.set(0, 0, 0))
       _rot.makeRotationFromQuaternion(_q)
       _p.set(0, joint ? -part.h / 2 : 0, 0)
-      _s.set(part.w, part.h, part.d)
+      _s.set(part.w * _b.x, part.h, part.d * _b.y)
       _m.compose(_p, _q.identity(), _s)
       instanced.setMatrixAt(i, _pivot.multiply(_rot).multiply(_m))
 
@@ -75,7 +80,7 @@ export function FallbackAvatar({ motionRef, handRef, onReady }) {
       const hand = handRef?.current
       if (part === RIGHT_ARM && hand) {
         hand.position.set(0, -part.h + 0.06, 0).applyEuler(_e)
-        hand.position.x += part.x
+        hand.position.x += x
         hand.position.y += part.y + pose.lift
         hand.quaternion.setFromEuler(_e)
       }

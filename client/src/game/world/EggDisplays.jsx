@@ -206,7 +206,7 @@ export function EggDisplays() {
     const glows = glowRef.current
     if (!mesh || !glows) return
     const t = state.clock.elapsedTime
-    const glowSize = getQuality().boardGlow
+    const glowSize = getQuality().glow
     EGG_STANDS.forEach((stand, i) => {
       const scale = stand.big ? 1.5 : 1.05
       // The Demon Egg is crowned with horns and wings, so it turns on the spot.

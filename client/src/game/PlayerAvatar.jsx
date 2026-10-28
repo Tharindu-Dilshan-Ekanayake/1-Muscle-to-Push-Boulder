@@ -1,18 +1,11 @@
-import { useFrame, useLoader } from '@react-three/fiber'
+import { useFrame } from '@react-three/fiber'
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
-import { Box3, MeshLambertMaterial, Vector3 } from 'three'
+import { Bone, Box3, BufferAttribute, BufferGeometry, DataTexture, MeshLambertMaterial, Skeleton, SkinnedMesh, Vector3 } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 
-import {
-  assetUrls,
-  BASE_BODY_URL,
-  isRealId,
-  PART_SLOTS,
-  skinCompositeUrl,
-  skinIdOrDefault,
-} from '../bloxity/avatarAssets'
-import { loadOBJ, loadPartGLB, loadTexture } from '../bloxity/avatarLoader'
+import { BASE_BODY_URL } from '../bloxity/avatarAssets'
+import { loadLook } from '../bloxity/avatarLoader'
 import { useBloxity } from '../bloxity/BloxityContext'
 import { shareLook } from '../net/connection'
 import {
@@ -25,6 +18,7 @@ import {
   disposeMergedBody,
   mergeBody,
   placeHand,
+  prepareMuscleParts,
 } from './avatarRig'
 
 /**
@@ -50,7 +44,11 @@ function fallbackMotion(delta) {
  * single draw call (plus one per hat or back item).
  *
  * Any slot that is unequipped or 404s leaves the base body's own part in place. The
- * whole thing re-assembles when `equipped` changes.
+ * whole thing re-assembles when `equipped` changes. Nothing shows until it's dressed:
+ * never a bare base body.
+ *
+ * Far away (`motion.poseEvery` > 1), it's posed only every that many frames: a few
+ * pixels tall, nobody sees the difference, and it saves the bone work.
  *
  * @param {{ equipped?: object, proportions?: object, onReady?: () => void,
  *   onStep?: (text: string) => void, targetHeight?: number, motionRef?: object,
@@ -61,13 +59,56 @@ function fallbackMotion(delta) {
  *   an object beside the avatar that gets moved onto the right palm every frame, for
  *   anything held. `onStep` reports loading progress.
  */
-export const BloxityAvatar = forwardRef(function BloxityAvatar(
-  { equipped, proportions, onReady, onStep, targetHeight = 1.8, motionRef, handRef, ...props },
+export const BloxityAvatar = forwardRef(function BloxityAvatar(props, ref) {
+  const baseScene = useBaseBody()
+  return baseScene ? <DressedAvatar ref={ref} baseScene={baseScene} {...props} /> : null
+})
+
+/**
+ * player.glb, the base body every avatar is built from: fetched and parsed as soon as
+ * the game starts, and handed straight to whoever's waiting - not through Suspense,
+ * whose retry React leaves until the scene's start-up work is done (seconds later on a
+ * slow phone). three's own GLTFLoader (the one the cosmetics use too), not drei's
+ * useGLTF, which would bundle a second loader plus Draco/Meshopt/KTX2 decoders this GLB
+ * never needs.
+ */
+let baseBody = null
+let baseBodyError = null
+// Its own texture is never used (every avatar gets its skin), so it isn't even decoded:
+// that kept the parse waiting for the start-up work to finish.
+const baseLoader = new GLTFLoader().register(() => ({ name: 'pp_skip_textures', loadTexture: () => Promise.resolve(null) }))
+const baseBodyLoad = fetch(BASE_BODY_URL, { priority: 'high' })
+  .then((res) => res.arrayBuffer())
+  .then((data) => baseLoader.parseAsync(data, BASE_BODY_URL.replace(/[^/]*$/, '')))
+  .then((gltf) => (baseBody = gltf.scene))
+  .catch((err) => {
+    baseBodyError = err
+    throw err
+  })
+
+/** The base body's scene once it's in (null until then); a failed load throws, for the ErrorBoundary. */
+function useBaseBody() {
+  const [scene, setScene] = useState(baseBody)
+  const [error, setError] = useState(baseBodyError)
+  useEffect(() => {
+    if (scene) return undefined
+    let live = true
+    baseBodyLoad.then(
+      (loaded) => live && setScene(loaded),
+      (err) => live && setError(err),
+    )
+    return () => {
+      live = false
+    }
+  }, [scene])
+  if (error) throw error
+  return scene
+}
+
+const DressedAvatar = forwardRef(function DressedAvatar(
+  { baseScene, equipped, proportions, onReady, onStep, targetHeight = 1.8, motionRef, handRef, ...props },
   ref,
 ) {
-  // three's own GLTFLoader (the one the cosmetics use too), not drei's useGLTF, which
-  // would bundle a second loader plus Draco/Meshopt/KTX2 decoders this GLB never needs.
-  const { scene: baseScene } = useLoader(GLTFLoader, BASE_BODY_URL)
   const [assembled, setAssembled] = useState(false)
   /** The merged body currently shown; replaced on every re-assembly. */
   const bodyRef = useRef(null)
@@ -94,6 +135,9 @@ export const BloxityAvatar = forwardRef(function BloxityAvatar(
     return collected
   }, [character])
 
+  // The rounded body's parts, built bit by bit while the rest of the avatar loads.
+  useEffect(() => prepareMuscleParts(rig), [rig])
+
   // Measured once, from the bind pose, before proportions touch the root scale.
   const fit = useMemo(() => {
     const box = new Box3().setFromObject(character)
@@ -115,50 +159,7 @@ export const BloxityAvatar = forwardRef(function BloxityAvatar(
 
     onStep?.('Loading avatar…')
 
-    const jobs = []
-
-    // Skin always loads - "0" is the fallback, since the base body has no baked map.
-    // With a face, shirt or pants worn it's the server-composited version; if that
-    // can't be fetched, the bare skin is better than an untextured body.
-    const compositeUrl = skinCompositeUrl(equipped)
-    const plainSkinUrl = assetUrls.skinTexture(skinIdOrDefault(equipped?.skinId))
-    jobs.push(
-      (compositeUrl ? loadTexture(compositeUrl) : Promise.resolve(null))
-        .then((texture) => texture || loadTexture(plainSkinUrl))
-        .then((texture) => ({ kind: 'skin', texture })),
-    )
-
-    // Body parts: fetch only real ids; a missing slot resets to the base geometry.
-    for (const [slot, cfg] of Object.entries(PART_SLOTS)) {
-      const id = equipped?.[cfg.idKey]
-      if (!isRealId(id)) {
-        jobs.push(Promise.resolve({ kind: 'part', slot, scene: null }))
-        continue
-      }
-      jobs.push(
-        loadPartGLB(assetUrls.part(slot, id)).then((scene) => ({
-          kind: 'part',
-          slot,
-          scene,
-        })),
-      )
-    }
-
-    // Accessories.
-    for (const [kind, idKey, meshUrl, texUrl] of [
-      ['hat', 'hatId', assetUrls.hatMesh, assetUrls.hatTexture],
-      ['back', 'backId', assetUrls.backMesh, assetUrls.backTexture],
-    ]) {
-      const id = equipped?.[idKey]
-      if (!isRealId(id)) continue
-      jobs.push(
-        Promise.all([loadOBJ(meshUrl(id)), loadTexture(texUrl(id))]).then(
-          ([object, texture]) => ({ kind: 'accessory', accessory: kind, object, texture }),
-        ),
-      )
-    }
-
-    Promise.all(jobs)
+    loadLook(equipped)
       .then((results) => {
         if (cancelled) return
 
@@ -229,14 +230,22 @@ export const BloxityAvatar = forwardRef(function BloxityAvatar(
   // and re-scaled each pass, which keeps it idempotent and survives anything else
   // that touches the skeleton.
   const proportionsRef = useRef(proportions)
-  proportionsRef.current = proportions
+  useEffect(() => {
+    proportionsRef.current = proportions
+  }, [proportions])
+  const frame = useRef(0)
 
   useFrame((_state, delta) => {
+    if (!assembled) return
+    const every = motionRef?.current?.poseEvery ?? 1
+    frame.current += 1
+    if (every > 1 && frame.current % every !== 0) return
     try {
       // Order matters: proportions reset every bone to its rest pose, and the
       // animation then rotates on top of that clean base.
-      applyProportions(rig, proportionsRef.current)
-      animateRig(rig, motionRef?.current ?? fallbackMotion(delta), 1 / fit.scale)
+      const motion = motionRef?.current ?? fallbackMotion(delta)
+      applyProportions(rig, proportionsRef.current, motion.bulk)
+      animateRig(rig, motion, 1 / fit.scale)
       if (handRef?.current) placeHand(rig, handRef.current)
     } catch {
       // A malformed payload must not kill the render loop.
@@ -252,7 +261,7 @@ export const BloxityAvatar = forwardRef(function BloxityAvatar(
     <group ref={ref} {...props}>
       {/* Fit scale lives on this wrapper, not on `character` - applyProportions
           overwrites the character's own scale every frame. */}
-      <group scale={fit.scale} position={[0, fit.footOffset, 0]}>
+      <group scale={fit.scale} position={[0, fit.footOffset, 0]} visible={assembled}>
         <primitive object={character} />
       </group>
     </group>
@@ -260,15 +269,57 @@ export const BloxityAvatar = forwardRef(function BloxityAvatar(
 })
 
 /**
+ * An invisible stand-in with just what a dressed body asks of its shader - a skinned,
+ * morphing, textured Lambert mesh - in the scene from the start, so the start-up shader
+ * warm-up (which compiles hidden things too) builds that program with the rest. Your
+ * avatar, dressed only once the SDK has said in what (after the warm-up), then draws
+ * without a compile of its own. Kept for good: its material keeps the program alive.
+ */
+export function AvatarShaderWarmup() {
+  const mesh = useMemo(() => {
+    const geometry = new BufferGeometry()
+    const vec = (size) => new BufferAttribute(new Float32Array(3 * size), size)
+    for (const [name, size] of [['position', 3], ['normal', 3], ['uv', 2], ['skinIndex', 4], ['skinWeight', 4]]) geometry.setAttribute(name, vec(size))
+    geometry.morphAttributes.position = [vec(3)]
+    geometry.morphAttributes.normal = [vec(3)]
+    geometry.morphTargetsRelative = true
+    const map = new DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1)
+    const body = new SkinnedMesh(geometry, new MeshLambertMaterial({ map }))
+    const bone = new Bone()
+    body.add(bone)
+    body.bind(new Skeleton([bone]))
+    body.visible = false
+    body.frustumCulled = false
+    return body
+  }, [])
+  useEffect(
+    () => () => {
+      mesh.geometry.dispose()
+      mesh.material.map.dispose()
+      mesh.material.dispose()
+      mesh.skeleton.dispose()
+    },
+    [mesh],
+  )
+  return <primitive object={mesh} />
+}
+
+/**
  * Your own avatar: whatever your Bloxity account (or guest) is wearing. Also tells the
  * other players, so they see you dressed the same.
  */
 export const PlayerAvatar = forwardRef(function PlayerAvatar(props, ref) {
-  const { avatar, proportions, game } = useBloxity()
+  const { avatar, proportions, game, status } = useBloxity()
   useEffect(() => shareLook(avatar, proportions), [avatar, proportions])
-  return <BloxityAvatar ref={ref} {...props} equipped={avatar} proportions={proportions} onStep={game.loadingStep} />
+  // The same outfit again (the SDK hands over a fresh object on every sign-in check)
+  // isn't a change: only a different one re-dresses you.
+  const lookKey = JSON.stringify(avatar ?? null)
+  const look = useMemo(() => JSON.parse(lookKey), [lookKey])
+  // Dressed once, in what you're really wearing: not until the SDK has said what that
+  // is (or failed to), rather than in nothing first.
+  if (status === 'idle' || status === 'loading') return null
+  return <BloxityAvatar ref={ref} {...props} equipped={look} proportions={proportions} onStep={game.loadingStep} />
 })
 
-useLoader.preload(GLTFLoader, BASE_BODY_URL)
 
 export default PlayerAvatar

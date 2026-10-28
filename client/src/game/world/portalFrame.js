@@ -10,15 +10,10 @@ export const PORTAL_CENTER_Y = PORTALS[0].radius + 0.6
  * on every fourth block), the slab under it, and its swirl's colours (linear RGB).
  */
 export const PORTAL_THEMES = {
-  world2: {
-    ring: ['#7fd0ff', '#bfeaff'],
-    base: '#e6f6ff',
-    swirl: { deep: [0.12, 0.45, 0.95], light: [0.75, 0.95, 1.0], core: [0.6, 0.6, 0.6] },
-  },
-  world3: {
-    ring: ['#6a2fa0', '#ff8a1f', '#ffb23a'],
-    base: '#2e2340',
-    swirl: { deep: [0.3, 0.05, 0.5], light: [1.0, 0.5, 0.08], core: [0.55, 0.9, 0.2] },
+  future: {
+    ring: ['#4a5260', '#5d6675', '#3fd0ff'],
+    base: '#3a414c',
+    swirl: { deep: [0.05, 0.35, 0.95], light: [0.55, 0.92, 1.0], core: [0.5, 0.8, 0.9] },
   },
 }
 
